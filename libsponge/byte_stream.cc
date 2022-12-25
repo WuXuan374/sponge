@@ -11,20 +11,15 @@
 template <typename... Targs>
 void DUMMY_CODE(Targs &&... /* unused */) {}
 
-using namespace std;
+// using namespace std;
 
-ByteStream::ByteStream(const size_t capacity) {  
-    // m_capacity 只负责记录最大容量；目前 stream 实际装载了多少东西，由 m_buffer 存储
-    m_capacity = capacity;
-    m_write_count = 0;
-    m_read_count = 0;
-    m_input_ended = false;
-    _error = false;
-}
+ // m_capacity 只负责记录最大容量；目前 stream 实际装载了多少东西，由 m_buffer 存储
+ByteStream::ByteStream(const size_t capacity) : m_buffer(""), m_capacity(capacity), m_write_count(0), m_read_count(0), m_input_ended(false), _error(false) {} 
 
-size_t ByteStream::write(const string &data) {
+
+size_t ByteStream::write(const std::string &data) {
     if (!input_ended()) {
-        string content = data.substr(0, remaining_capacity());
+        std::string content = data.substr(0, remaining_capacity());
         // as queue, first come first out
         m_buffer.append(content); 
         // 实际写入的长度
@@ -37,7 +32,8 @@ size_t ByteStream::write(const string &data) {
 }
 
 //! \param[in] len bytes will be copied from the output side of the buffer
-string ByteStream::peek_output(const size_t len) const {
+std::string ByteStream::peek_output(const size_t len) const {
+    // 边界情况，len <= 0, 返回空字符串
     return m_buffer.substr(0, len);
 }
 
@@ -53,12 +49,12 @@ void ByteStream::pop_output(const size_t len) {
 //! \returns a string
 std::string ByteStream::read(const size_t len) {
     if (!eof()) {
-        const string content = peek_output(len);
+        const std::string content = peek_output(len);
         pop_output(len);
         return content;
     } else {
         set_error();
-        return NULL;
+        return "";
     }
 }
 
