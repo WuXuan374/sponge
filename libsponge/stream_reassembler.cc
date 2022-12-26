@@ -55,6 +55,10 @@ void StreamReassembler::push_string_to_set(const std::string &data, const size_t
     }
     // 能够写入的最大长度
     size_t bytes_left = _capacity - current_bytes;
+    if (bytes_left < (end_idx-start_idx)) {
+        remove_from_set(end_idx-start_idx-bytes_left);
+    }
+    bytes_left = _capacity - bytes_count();
     size_t written_count = std::min(end_idx-start_idx, bytes_left);
     if (written_count > 0) {
         Block b;
@@ -139,10 +143,9 @@ pair<size_t, size_t> StreamReassembler::get_non_overlap_range(const std::string 
             }
         } else if (cur_start_idx <= end_idx) {
             if (cur_end_idx <= end_idx) {
-                auto next = it++; // 这个字符串会被新添加的字符串全覆盖
+                // 这个字符串会被新添加的字符串全覆盖
                 _unassembled_count -= (*it).data.length();
-                _blocks.erase(it);
-                it = next;
+                it = _blocks.erase(it); // erase 会返回下一个节点
             } else {
                 end_idx = cur_start_idx;
                 it++;
@@ -153,6 +156,53 @@ pair<size_t, size_t> StreamReassembler::get_non_overlap_range(const std::string 
     }
     
     return make_pair(start_idx, end_idx);
+}
+
+void StreamReassembler::remove_from_set(size_t count) {
+    // 出现容量不够的情况，这时候从 set 的末尾开始删除字符串
+    // if (_blocks.size() < 1) {
+    //     return;
+    // }
+    // std::set<Block>::iterator it = _blocks.end();
+    // it--; // set 的最后一个元素
+    // do {
+    //     if (count >= (*it).data.length()) {
+    //         it = _blocks.erase(it); // erase 返回的是下一个节点
+    //         count -= ((*it).data.length());
+    //         _unassembled_count -= ((*it).data.length());
+    //         it--;
+    //     } else {
+    //         size_t new_length = (*it).data.length() - count;
+    //         const std::string new_data = (*it).data.substr(0, new_length);
+    //         const size_t start_index = (*it).start_index;
+    //         Block b;
+    //         b.start_index = start_index;
+    //         b.data = new_data;
+    //         _blocks.erase(it);
+    //         _blocks.insert(b);
+    //         _unassembled_count -= count;
+    //         count = 0;
+    //         break;
+    //     }
+    // } while (count > 0 && it != _blocks.begin());
+
+    auto rit = _blocks.rbegin();
+    while (count > 0 && rit != _blocks.rend()) {
+        if (count >= (*rit).data.length()) {
+            count -= ((*rit).data.length());
+            _unassembled_count -= ((*rit).data.length());
+            rit = decltype(rit)(_blocks.erase( std::next(rit).base() ));
+        } else {
+            size_t new_length = (*rit).data.length() - count;
+            Block b;
+            b.start_index = (*rit).start_index;
+            b.data = (*rit).data.substr(0, new_length);
+            _blocks.erase( std::next(rit).base() );
+            _blocks.insert(b);
+            _unassembled_count -= count;
+            count = 0;
+        }
+    }
 }
 
 void StreamReassembler::check_eof() {

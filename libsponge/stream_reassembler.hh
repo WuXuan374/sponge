@@ -60,6 +60,8 @@ class StreamReassembler {
 
     pair<size_t, size_t> get_non_overlap_range(const std::string &data, const size_t index);
 
+    void remove_from_set(size_t count);
+
   public:
     //! \brief Construct a `StreamReassembler` that will store up to `capacity` bytes.
     //! \note This capacity limits both the bytes that have been reassembled,
