@@ -42,26 +42,26 @@ void StreamReassembler::push_string_to_set(const std::string &data, const size_t
      * 修改状态: _unassembled_count
     */
 
+    const pair<size_t, size_t> range = get_non_overlap_range(data, index);
+    const size_t start_idx = range.first;
+    const size_t end_idx = range.second;
+    if (start_idx == SIZE_MAX && end_idx == SIZE_MAX) {
+        return;
+    }
+
     size_t current_bytes = bytes_count();
     if (current_bytes >= _capacity) {
         return; // 这个 string 直接被舍弃
     }
     // 能够写入的最大长度
     size_t bytes_left = _capacity - current_bytes;
-
-    const size_t start_idx = _assembled_end_index > index ? (_assembled_end_index - index) : 0;
-    if (start_idx >= data.length()) { // 空字符串也没有存储的必要
-        return;
-    }
-
-    // 注意 substr 的 start_idx, 是相对于这个字符串而言的，不是整体的 index
-    const std::string written_data = data.substr(start_idx, bytes_left);
-    if (written_data.length() > 0) {
+    size_t written_count = std::min(end_idx-start_idx, bytes_left);
+    if (written_count > 0) {
         Block b;
-        b.start_index = index + start_idx;
-        b.data = written_data;
+        b.start_index = start_idx;
+        b.data = data.substr(start_idx - index, written_count);
         _blocks.insert(b);
-        _unassembled_count += written_data.length();
+        _unassembled_count += written_count;
     }
 }
 
@@ -113,17 +113,47 @@ void StreamReassembler::assemble_string_to_stream(const std::string &data, const
     check_eof();
 }
 
-// pair<size_t, size_t> StreamReassembler::get_non_overlap_range(const std::string &data, const size_t index) {
-//     /**
-//      * 将字符串加入队列的时候，应该避免 overlap
-//      * 这里的逻辑是: 后加入队列的字符串，应该只截取没有 overlap 的部分
-//      * start_idx: _assembled_end_index, index, 队列中元素结尾位置 --> 最大值
-//      * end_idx: 队列中元素的开始位置，index + data.length() --> 最小值
-//     */
-//    size_t start_idx = _assembled_end_index > index ? _assembled_end_index : index;
-//    size_t end_idx = index + data.length();
+pair<size_t, size_t> StreamReassembler::get_non_overlap_range(const std::string &data, const size_t index) {
+    /**
+     * 将字符串加入 set 的时候，应该避免 overlap
+     * 这里的逻辑是: 后加入 set 的字符串，应该只截取没有 overlap 的部分
+     * start_idx: _assembled_end_index, index, set 中元素结尾位置 --> 最大值
+     * end_idx: set 中元素的开始位置，index + data.length() --> 最小值
+    */
+    size_t start_idx = _assembled_end_index > index ? _assembled_end_index : index;
+    size_t end_idx = index + data.length();
 
-// }
+    std::set<Block>::iterator it = _blocks.begin();
+    while (it != _blocks.end()) {
+        size_t cur_start_idx = (*it).start_index;
+        size_t cur_end_idx = cur_start_idx + (*it).data.length();
+
+        if (cur_start_idx <= start_idx) {
+            if (cur_end_idx >= end_idx) {
+                return make_pair(SIZE_MAX, SIZE_MAX); // 不应该插入这个 string 
+            } else if (cur_end_idx <= start_idx) {
+                it++;
+            } else {
+                start_idx = cur_end_idx;
+                it++;
+            }
+        } else if (cur_start_idx <= end_idx) {
+            if (cur_end_idx <= end_idx) {
+                auto next = it++; // 这个字符串会被新添加的字符串全覆盖
+                _unassembled_count -= (*it).data.length();
+                _blocks.erase(it);
+                it = next;
+            } else {
+                end_idx = cur_start_idx;
+                it++;
+            }
+        } else { // cur_start_idx > end_idx
+            break; // 不会再有 overlap 了
+        }
+    }
+    
+    return make_pair(start_idx, end_idx);
+}
 
 void StreamReassembler::check_eof() {
     /**

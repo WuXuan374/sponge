@@ -58,7 +58,7 @@ class StreamReassembler {
 
     void check_eof();
 
-    // pair<size_t, size_t> get_non_overlap_range(const std::string &data, const size_t index);
+    pair<size_t, size_t> get_non_overlap_range(const std::string &data, const size_t index);
 
   public:
     //! \brief Construct a `StreamReassembler` that will store up to `capacity` bytes.
