@@ -18,7 +18,7 @@ void DUMMY_CODE(Targs &&... /* unused */) {}
  * _unassembled_count
 */
 
-StreamReassembler::StreamReassembler(const size_t capacity) : _output(capacity), _capacity(capacity), _idx_to_string(), _assembled_end_index(0), _unassembled_count(0), _eof_index(SIZE_MAX) {}
+StreamReassembler::StreamReassembler(const size_t capacity) : _output(capacity), _capacity(capacity), _blocks(), _assembled_end_index(0), _unassembled_count(0), _eof_index(SIZE_MAX) {}
 
 //! \details This function accepts a substring (aka a segment) of bytes,
 //! possibly out-of-order, from the logical stream, and assembles any newly
@@ -30,11 +30,11 @@ void StreamReassembler::push_substring(const std::string &data, const size_t ind
     }
     // 分成两步走，先把 string 写入队列
     // 然后统一检查队列中有哪些 bytes 可以被重组
-    push_string_to_queue(data, index);
-    assemble_string_from_queue();
+    push_string_to_set(data, index);
+    assemble_string_from_set();
 }
 
-void StreamReassembler::push_string_to_queue(const std::string &data, const size_t index) {
+void StreamReassembler::push_string_to_set(const std::string &data, const size_t index) {
     /**
      * 把接收的 string 写入 queue 中
      * 只有索引 >= _assembled_end_index 的部分，才有必要写入
@@ -57,41 +57,40 @@ void StreamReassembler::push_string_to_queue(const std::string &data, const size
     // 注意 substr 的 start_idx, 是相对于这个字符串而言的，不是整体的 index
     const std::string written_data = data.substr(start_idx, bytes_left);
     if (written_data.length() > 0) {
-        _idx_to_string.push(
-            make_pair(
-                index + start_idx, 
-                written_data
-            )
-        );
+        Block b;
+        b.start_index = index + start_idx;
+        b.data = written_data;
+        _blocks.insert(b);
         _unassembled_count += written_data.length();
     }
 }
 
 
-void StreamReassembler::assemble_string_from_queue() {
+void StreamReassembler::assemble_string_from_set() {
     /**
      * 遍历 _idx_to_substring, 依次将 string 写入 byte stream 中
      * 这里头我们就不需要考虑 capacity 了，本操作不影响 capacity
      * 需要维护的状态: _unassembled_count
     */
-    while (!_idx_to_string.empty()) {
-        const size_t cur_index = _idx_to_string.top().first;
-        const std::string cur_data = _idx_to_string.top().second;
-        cout << "80: " << cur_index << " " << _assembled_end_index << endl;
-        
+    while (!_blocks.empty()) {
+        // 起始位置最小的元素，是最有可能被重组的
+        std::set<Block>::iterator it = _blocks.begin();
+        Block minimum = *it;
+        const size_t cur_index = minimum.start_index;
+        const std::string cur_data = minimum.data;
         if (cur_index > _assembled_end_index) {
             break; // 队列中不存在能够重组的字符串
         }
-        _idx_to_string.pop();
+        _blocks.erase(it);
         _unassembled_count -= cur_data.length();
         assemble_string_to_stream(cur_data, cur_index);
 
-        // 根据 _assembled_end_index 的值，我们可以记录有多少 byte 被写入，并相应处理
         if (_assembled_end_index < cur_index + cur_data.length()) {
-            // string 没有全部被写入
-            // cout << "91: " << _assembled_end_index << p.first << " " << _assembled_end_index - p.first << " " << p.second.length() << endl;
             const std::string string_left = cur_data.substr(_assembled_end_index - cur_index);
-            _idx_to_string.push(make_pair(_assembled_end_index, string_left));
+            Block b;
+            b.start_index = _assembled_end_index;
+            b.data = string_left;
+            _blocks.insert(b);
             _unassembled_count += string_left.length();
         }
     }
@@ -113,6 +112,18 @@ void StreamReassembler::assemble_string_to_stream(const std::string &data, const
     _assembled_end_index += written_data.length();
     check_eof();
 }
+
+// pair<size_t, size_t> StreamReassembler::get_non_overlap_range(const std::string &data, const size_t index) {
+//     /**
+//      * 将字符串加入队列的时候，应该避免 overlap
+//      * 这里的逻辑是: 后加入队列的字符串，应该只截取没有 overlap 的部分
+//      * start_idx: _assembled_end_index, index, 队列中元素结尾位置 --> 最大值
+//      * end_idx: 队列中元素的开始位置，index + data.length() --> 最小值
+//     */
+//    size_t start_idx = _assembled_end_index > index ? _assembled_end_index : index;
+//    size_t end_idx = index + data.length();
+
+// }
 
 void StreamReassembler::check_eof() {
     /**

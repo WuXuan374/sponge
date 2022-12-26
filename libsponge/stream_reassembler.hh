@@ -5,7 +5,7 @@
 
 #include <cstdint>
 #include <string>
-#include <queue>
+#include <set>
 
 // class ComparisonClass {
 //   public:
@@ -14,11 +14,11 @@
 //       }
 //   };
 
-struct CustomCompare {
-  bool operator()(const pair<size_t, std::string>& a, const pair<size_t, std::string>& b) {
-    return a.first > b.first;
-  }
-};
+// struct CustomCompare {
+//   bool operator()(const pair<size_t, std::string>& a, const pair<size_t, std::string>& b) {
+//     return a.first > b.first;
+//   }
+// };
 
 //! \brief A class that assembles a series of excerpts from a byte stream (possibly out of order,
 //! possibly overlapping) into an in-order byte stream.
@@ -30,8 +30,15 @@ class StreamReassembler {
     size_t _capacity;    //!< The maximum number of bytes
     
     // idx 到 string 的映射，按照 idx 升序存储
-    priority_queue< pair<size_t, std::string>, std::vector<pair<size_t, std::string>>, CustomCompare > _idx_to_string;
-    // priority_queue<pair<size_t, std::string>> _idx_to_string;
+    // priority_queue< pair<size_t, std::string>, std::vector<pair<size_t, std::string>>, CustomCompare > _idx_to_string;
+    struct Block {
+      size_t start_index = 0;
+      std::string data = "";
+      bool operator<(const Block b) const { return start_index < b.start_index; }
+    };
+    
+    set<Block> _blocks;
+
     size_t _assembled_end_index; // 已经重组好的数据的 end index, 注意是开区间
     // unassembled string 长度
     // 每次新增 unassembled string, 或者有 string 被写入 stream 的时候，要记得修改
@@ -41,15 +48,17 @@ class StreamReassembler {
     // Byte Stream unread length + unassembled string length
     size_t bytes_count() const;
 
-    void push_string_to_queue(const std::string &data, const size_t index);
+    void push_string_to_set(const std::string &data, const size_t index);
 
     // 把 string 写入 byte stream, 这一个函数内不需要考虑 capacity
     void assemble_string_to_stream(const std::string &data, const size_t index);
 
-    // 组合之前没有重组成功，存储在优先级队列中的 string
-    void assemble_string_from_queue();
+    // 组合之前没有重组成功，存储在 set 中的 string
+    void assemble_string_from_set();
 
     void check_eof();
+
+    // pair<size_t, size_t> get_non_overlap_range(const std::string &data, const size_t index);
 
   public:
     //! \brief Construct a `StreamReassembler` that will store up to `capacity` bytes.
