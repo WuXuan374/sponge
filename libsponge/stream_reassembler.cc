@@ -28,8 +28,10 @@ void StreamReassembler::push_substring(const std::string &data, const size_t ind
         _eof_index = index + data.length();
         check_eof();
     }
-    // 分成两步走，先把 string 写入队列
-    // 然后统一检查队列中有哪些 bytes 可以被重组
+    /**
+     * 分成两步走，先把 string 写入队列
+     * 然后统一检查队列中有哪些 bytes 可以被重组
+     * */ 
     push_string_to_set(data, index);
     assemble_string_from_set();
 }
@@ -111,7 +113,6 @@ void StreamReassembler::assemble_string_to_stream(const std::string &data, const
     }
     const std::string written_data = data.substr(_assembled_end_index - index, _output.remaining_capacity());
     _output.write(written_data);
-    // 修改状态
     _assembled_end_index += written_data.length();
     check_eof();
 }

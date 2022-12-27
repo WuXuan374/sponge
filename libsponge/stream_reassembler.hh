@@ -7,19 +7,6 @@
 #include <string>
 #include <set>
 
-// class ComparisonClass {
-//   public:
-//       bool operator() (pair<size_t, std::string> const& a, pair<size_t, std::string> const& b) {
-//           return a.first < b.first;
-//       }
-//   };
-
-// struct CustomCompare {
-//   bool operator()(const pair<size_t, std::string>& a, const pair<size_t, std::string>& b) {
-//     return a.first > b.first;
-//   }
-// };
-
 //! \brief A class that assembles a series of excerpts from a byte stream (possibly out of order,
 //! possibly overlapping) into an in-order byte stream.
 class StreamReassembler {
@@ -29,8 +16,6 @@ class StreamReassembler {
     ByteStream _output;  //!< The reassembled in-order byte stream
     size_t _capacity;    //!< The maximum number of bytes
     
-    // idx 到 string 的映射，按照 idx 升序存储
-    // priority_queue< pair<size_t, std::string>, std::vector<pair<size_t, std::string>>, CustomCompare > _idx_to_string;
     struct Block {
       size_t start_index = 0;
       std::string data = "";
@@ -40,9 +25,8 @@ class StreamReassembler {
     set<Block> _blocks;
 
     size_t _assembled_end_index; // 已经重组好的数据的 end index, 注意是开区间
-    // unassembled string 长度
-    // 每次新增 unassembled string, 或者有 string 被写入 stream 的时候，要记得修改
-    size_t _unassembled_count; 
+    
+    size_t _unassembled_count; // unassembled string 长度
     size_t _eof_index;
 
     // Byte Stream unread length + unassembled string length
