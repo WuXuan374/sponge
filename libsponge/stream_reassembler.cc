@@ -57,7 +57,7 @@ void StreamReassembler::push_string_to_set(const std::string &data, const size_t
     // 如果剩下的容量不足以存放当前字符串，则调用 remove_from_set
     // remove_from_set 的逻辑是: 优先删除缓存的，start_index 最大的字符串（能够被重组的概率最低）
     if (end_idx - start_idx > (_capacity - bytes_count())) {
-        remove_from_set(end_idx - start_idx - (_capacity - bytes_count()));
+        remove_from_set(end_idx - start_idx - (_capacity - bytes_count()), start_idx);
     }
     size_t bytes_left = _capacity - bytes_count();
     size_t written_count = std::min(end_idx-start_idx, bytes_left);
@@ -164,9 +164,14 @@ pair<size_t, size_t> StreamReassembler::get_non_overlap_range(const std::string 
     return make_pair(start_idx, end_idx);
 }
 
-void StreamReassembler::remove_from_set(size_t count) {
+void StreamReassembler::remove_from_set(size_t count, size_t start_idx) {
+    /**
+     * 如果空间不够，应该优先删除 set 中 start_index 比较大的部分
+     * 从后往前遍历
+     * 如果发现当前 set 元素的 start_index <= start_idx, 则停止遍历
+    */
     auto rit = _blocks.rbegin();
-    while (count > 0 && rit != _blocks.rend()) {
+    while (count > 0 && rit != _blocks.rend() && (*rit).start_index > start_idx) {
         if (count >= (*rit).data.length()) {
             count -= ((*rit).data.length());
             _unassembled_count -= ((*rit).data.length());

@@ -136,6 +136,29 @@ int main() {
             test.execute(BytesAvailable("abcde"));
             test.execute(AtEof{});
         }
+
+        // 12-27: wuxuan diy test targeting `remove_from_set`
+        {
+            ReassemblerTestHarness test{8};
+
+            test.execute(SubmitSegment{"abcd", 0});
+            test.execute(BytesAssembled(4));
+            test.execute(NotAtEof{});
+
+            // Stream re-assembler should ignore empty segments
+            test.execute(SubmitSegment{"fg", 5});
+            test.execute(BytesAssembled(4));
+            test.execute(NotAtEof{});
+
+            test.execute(SubmitSegment{"ghX", 6});
+            test.execute(BytesAssembled(4));
+            test.execute(NotAtEof{});
+
+            test.execute(SubmitSegment{"efg", 4});
+            test.execute(BytesAssembled(8));
+            test.execute(BytesAvailable("abcdefgh"));
+            test.execute(NotAtEof{});
+        }
     } catch (const exception &e) {
         cerr << "Exception: " << e.what() << endl;
         return EXIT_FAILURE;
