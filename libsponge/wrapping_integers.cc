@@ -37,10 +37,7 @@ uint64_t unwrap(WrappingInt32 n, WrappingInt32 isn, uint64_t checkpoint) {
         absolute = n.raw_value() - isn.raw_value();
     } // absolute: [0, RANGE-1]
     if (checkpoint > absolute) {
-        absolute += RANGE * ((checkpoint - absolute) / RANGE);
-        if ((checkpoint - absolute) % RANGE > RANGE / 2) {
-            absolute += RANGE;
-        }
+        absolute += RANGE * ((checkpoint - absolute + RANGE / 2) / RANGE);
     }
     return absolute;
 }
