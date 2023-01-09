@@ -21,18 +21,25 @@ class TCPReceiver {
     size_t _capacity;
 
     // Initial Sequence Number
-    std::optional<WrappingInt32> _isn;
+    WrappingInt32 _isn;
 
     //! SYN 和 FIN 请求各自占据一个 sequence number
     //! 不修改 Reassembler 的具体实现，我们需要在其 assembled_end_index() 转换得到的 ack 基础之上，加上 _base_ackno
     size_t _base_ackno; 
+
+    //! 只考虑首次收到的 FIN flag; 因此加一个标志位
+    bool _fin_received;
+
+    //! 同样只考虑首次收到的 SYN flag;
+    bool _syn_received;
+    
 
   public:
     //! \brief Construct a TCP receiver
     //!
     //! \param capacity the maximum number of bytes that the receiver will
     //!                 store in its buffers at any give time.
-    TCPReceiver(const size_t capacity) : _reassembler(capacity), _capacity(capacity), _isn(std::nullopt), _base_ackno(0) {}
+    TCPReceiver(const size_t capacity) : _reassembler(capacity), _capacity(capacity), _isn(WrappingInt32{0}), _base_ackno(0), _fin_received(false), _syn_received(false) {}
 
     //! \name Accessors to provide feedback to the remote TCPSender
     //!@{
