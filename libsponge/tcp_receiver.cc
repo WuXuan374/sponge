@@ -14,18 +14,17 @@ void TCPReceiver::segment_received(const TCPSegment &seg) {
     // Set the Initial Sequence Number if necessary.
     // 注意: 如果 ISN 已经被初始化过了，不能重复初始化
     if (!_syn_received && seg.header().syn == true) {
-        _isn = WrappingInt32{seg.header().seqno};
-        _base_ackno += 1; // 除了 payload 之外，SYN 和 FIN flag 各占据了一个 sequence number
+        _isn = seg.header().seqno;
         _syn_received = true;
     }
     // 如果还没有发送 SYN (反映为 _isn 还没有被初始化)；则连接还没建立，我们不应该接收数据
-    if (!_syn_received) { 
+    // 如果已经收到了 FIN, 则不应该继续接收数据
+    if (!_syn_received || _fin_received) { 
         return; 
     }
 
     // Push any data, or end-of-stream marker, to the StreamReassembler.
     bool eof = false;
-    // 只考虑第一次接收的 FIN flag
     if (!_fin_received && seg.header().fin == true) {
         eof = true;
         _fin_received = true;
@@ -33,11 +32,7 @@ void TCPReceiver::segment_received(const TCPSegment &seg) {
 
     // seqno 也存在相应的偏移: 
     // 在 seqno 大于 _isn 时，由于 syn 占据了一位 sequence number, 因此需要 -1
-    // TODO: 这个做法还是不太好，比如说重复发送带有 SYN flag 的 segment, 似乎 -1 就不对了
-    WrappingInt32 seq_number = seg.header().seqno;
-    if (!seg.header().syn) {
-        seq_number = seq_number - 1;
-    }
+    WrappingInt32 seq_number = seqno(seg);
 
     uint64_t index = unwrap(
         seq_number, 
@@ -45,20 +40,34 @@ void TCPReceiver::segment_received(const TCPSegment &seg) {
         _reassembler.assembled_end_index() // ack 作为 checkpoint
     );
     _reassembler.push_substring(seg.payload().copy(), index, eof);
-    // 检查是否将所有 segment 组合完成了；如果是的话，_base_ackno + 1, 因为 FIN flag 占据一个 sequence number
-    if (_reassembler.input_ended()) {
-        _base_ackno += 1;
-    }
 
 }
 
 optional<WrappingInt32> TCPReceiver::ackno() const { 
+    //! 这个函数需要处理 assembled_end_index() 和 ackno 之间的转换问题；
+    //! 转换问题: 就目前所知， SYN 和 FIN flag 各自占据一个 sequence number, 这不会体现在 assembled_end_index() 中，需要我们手动补充
     if (_syn_received) { // 已经被初始化了
         // 加上 SYN 和 FIN 带来的 ack 偏移: _base_ackno
-        return wrap(_reassembler.assembled_end_index(), _isn) + _base_ackno; 
+        size_t base_ackno = 1; // SYN 带来的 ack 偏移
+        if (_reassembler.input_ended()) {
+            base_ackno += 1; // 所有数据都重组好了，此时考虑 FIN 带来的 ack 偏移
+        }
+        return wrap(_reassembler.assembled_end_index(), _isn) + base_ackno; 
     }
     // If the ISN hasn't been set, return an empty optional
     return {};
+}
+
+WrappingInt32 TCPReceiver::seqno(const TCPSegment &seg) const {
+    //! 转换问题: 就目前所知，SYN 和 FIN 会额外占据一个 sequence number; 这不会体现在 reassembler 的序号中，因此需要转换
+    size_t base_seqno = 0;
+    if (_syn_received) {
+        base_seqno += 1;
+        if (_fin_received) {
+            base_seqno += 1;
+        }
+    }
+    return WrappingInt32{seg.header().seqno - base_seqno};
 }
 
 
