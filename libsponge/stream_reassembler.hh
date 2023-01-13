@@ -81,8 +81,6 @@ class StreamReassembler {
     //! return _assembled_end_index; the index of the next byte that can be assembled 
     //! 对应 TCP receiver 的 ack number
     size_t assembled_end_index() const { return _assembled_end_index; };
-
-    bool input_ended() const { return _output.input_ended(); }
 };
 
 #endif  // SPONGE_LIBSPONGE_STREAM_REASSEMBLER_HH

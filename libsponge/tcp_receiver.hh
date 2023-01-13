@@ -28,10 +28,6 @@ class TCPReceiver {
 
     //! 同样只考虑首次收到的 SYN flag;
     bool _syn_received;
-
-    //! TCP 的 sequence number 和 reaseembler 的 number 之间是存在偏移的
-    //! 本函数处理这个偏移
-    WrappingInt32 seqno(const TCPSegment &seg) const;
     
 
   public:
