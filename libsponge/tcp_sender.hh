@@ -8,6 +8,7 @@
 
 #include <functional>
 #include <queue>
+#include <set>
 
 //! \brief The "sender" part of a TCP implementation.
 
@@ -23,20 +24,46 @@ class TCPSender {
     //! outbound queue of segments that the TCPSender wants sent
     std::queue<TCPSegment> _segments_out{};
 
+    //! total number of milliseconds, this TCPSender has been alive
+    size_t _ms_alive{0};
+
+    //! 计时器的开始时间
+    size_t _timer_start;
+
+    //! 连续重传次数
+    size_t _consecutive_retransmissions{0};
+
+    struct bySeqno {
+      bool operator () (const TCPSegment& a, TCPSegment& b) {
+        return a.header().seqno.raw_value() <= b.header().seqno.raw_value();
+      }
+    };
+
+    set<TCPSegment, bySeqno> _outstanding_segments{};
+
     //! retransmission timer for the connection
     unsigned int _initial_retransmission_timeout;
+
+    //! RTO 是可能变化的
+    unsigned int _retranmission_timeout;
 
     //! outgoing stream of bytes that have not yet been sent
     ByteStream _stream;
 
     //! the (absolute) sequence number for the next byte to be sent
+    //! 应该和 receiver 所发送的 ack 对应?
     uint64_t _next_seqno{0};
 
     //! 接收方的 window size, 每次收到 Receiver 发送的 segment 时，更新
     uint64_t _receiver_window_size;
 
-    //! 将指定长度的数据转成1个或多个 TCPSegment, 进行发送
-    void send_segments(uint64_t target_length);
+
+    //! 给出起始 seqno 和数据的整体长度
+    //! 将数据转成1个或多个 TCPSegment, 进行发送
+    void send_segments(uint64_t start_seqno, uint64_t data_len);
+
+    //! 已经把 Segment 配置好了，只要将其写入 _segments_out 和 _outstanding_segments 即可
+    void send_segment(TCPSegment seg);
 
   public:
     //! Initialize a TCPSender
