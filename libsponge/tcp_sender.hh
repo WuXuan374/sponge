@@ -33,19 +33,19 @@ class TCPSender {
     //! 连续重传次数
     size_t _consecutive_retransmissions{0};
 
-    struct bySeqno {
-      bool operator () (const TCPSegment& a, TCPSegment& b) {
+    struct cmp {
+      bool operator() (TCPSegment a, TCPSegment b) const {
         return a.header().seqno.raw_value() <= b.header().seqno.raw_value();
       }
     };
 
-    set<TCPSegment, bySeqno> _outstanding_segments{};
+    set<TCPSegment, cmp> _outstanding_segments{};
 
     //! retransmission timer for the connection
-    unsigned int _initial_retransmission_timeout;
+    uint64_t _initial_retransmission_timeout;
 
     //! RTO 是可能变化的
-    unsigned int _retranmission_timeout;
+    uint64_t _retranmission_timeout;
 
     //! outgoing stream of bytes that have not yet been sent
     ByteStream _stream;
@@ -55,8 +55,10 @@ class TCPSender {
     uint64_t _next_seqno{0};
 
     //! 接收方的 window size, 每次收到 Receiver 发送的 segment 时，更新
-    uint64_t _receiver_window_size;
+    //! 文档中说，当 Sender 还没有收到 ack 时，将 receiver window size 假设成 1
+    uint64_t _receiver_window_size{1};
 
+    uint64_t _bytes_in_flight{0};
 
     //! 给出起始 seqno 和数据的整体长度
     //! 将数据转成1个或多个 TCPSegment, 进行发送
