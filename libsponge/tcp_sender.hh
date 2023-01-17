@@ -32,6 +32,12 @@ class TCPSender {
     //! the (absolute) sequence number for the next byte to be sent
     uint64_t _next_seqno{0};
 
+    //! 接收方的 window size, 每次收到 Receiver 发送的 segment 时，更新
+    uint64_t _receiver_window_size;
+
+    //! 将指定长度的数据转成1个或多个 TCPSegment, 进行发送
+    void send_segments(uint64_t target_length);
+
   public:
     //! Initialize a TCPSender
     TCPSender(const size_t capacity = TCPConfig::DEFAULT_CAPACITY,
