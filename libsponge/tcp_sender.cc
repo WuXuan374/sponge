@@ -14,9 +14,6 @@
 //! sequence number, SYN flag, payload, FIN flag
 //! 更新私有变量 _next_seqno
 
-//! TODO: _next_seqno: 每次发送 segments 之后，需要维护
-//! TODO: _bytes_in_flight: 每次发送 segments 之后，或者收到 ack 之后，需要维护
-//! TODO: sequence number 的加减和比较
 //! TODO: 收到 _receiver_window_size 之后, 每次 Sender 发送数据后，需要维护 _receiver_window_size; 直到下一次收到 _receiver_window_size
 
 template <typename... Targs>
@@ -121,17 +118,18 @@ void TCPSender::send_empty_segment() {
     if (_stream.input_ended() && _stream.buffer_empty()) {
         tcp_seg.header().fin = true;
     }
-    // 把 segment 写入 _segments_out, 就视作完成了 segment 的发送
-    _segments_out.push(tcp_seg);
-
-    // 检查 segment 的长度，如果大于 0（存在 SYN 或 FIN），则需要加入 _outstand_segments 中，并维护 seqno 和 _bytes_in_flight
     size_t seg_len = tcp_seg.length_in_sequence_space();
-    if (seg_len > 0) {
+    
+    // 当前 window size 足够，才能发送 segment
+    if (_sender_window_size >= seg_len) {
+        _segments_out.push(tcp_seg);
         _next_seqno += seg_len;
         _bytes_in_flight += seg_len;
-        _timer_start = _ms_alive;
-        _outstanding_segments.insert(tcp_seg);
-        _sender_window_size = (_sender_window_size < seg_len) ? 0: _sender_window_size - seg_len;
+        _sender_window_size -= seg_len;
+        if (seg_len > 0) {
+            _timer_start = _ms_alive;
+            _outstanding_segments.insert(tcp_seg);
+        }
     }
     
     // 如果是 empty segment, 则不需要后续处理了
@@ -152,17 +150,18 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
         if (_stream.input_ended() && _stream.buffer_empty()) {
             tcp_seg.header().fin = true;
         }
-        // 只发送非空的 segment
-        if (tcp_seg.length_in_sequence_space() > 0) {
+        size_t seg_len = tcp_seg.length_in_sequence_space();
+        // 在 window 满足条件的情况下，发送非空的 segment
+        if (seg_len > 0 && _sender_window_size >= seg_len) {
             _segments_out.push(tcp_seg);
-            start_seqno += tcp_seg.length_in_sequence_space();
+            start_seqno += seg_len;
             // 添加计时器，加入 _outstanding_segments
             _timer_start = _ms_alive;
             _outstanding_segments.insert(tcp_seg);
             // 维护 _next_seqno 和 _bytes_in_flight
-            _bytes_in_flight += tcp_seg.length_in_sequence_space();
+            _bytes_in_flight += seg_len;
             _next_seqno = std::max(start_seqno, _next_seqno);
-            _sender_window_size = (_sender_window_size < tcp_seg.length_in_sequence_space()) ? 0: _sender_window_size - tcp_seg.length_in_sequence_space();
+            _sender_window_size -= seg_len;
         }
     } else {
         while (data_len > 0) {
@@ -177,16 +176,20 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
             if (_stream.input_ended() && _stream.buffer_empty()) {
                 tcp_seg.header().fin = true;
             }
-            _segments_out.push(tcp_seg);
-            start_seqno += tcp_seg.length_in_sequence_space();
-            
-            // 添加计时器，加入 _outstanding_segments
-            _timer_start = _ms_alive;
-            _outstanding_segments.insert(tcp_seg);
-            // 维护 _next_seqno 和 _bytes_in_flight
-            _bytes_in_flight += tcp_seg.length_in_sequence_space();
-            _next_seqno = std::max(start_seqno, _next_seqno);
-            _sender_window_size = (_sender_window_size < tcp_seg.length_in_sequence_space()) ? 0: _sender_window_size - tcp_seg.length_in_sequence_space();
+            // 检查 window 大小
+            size_t seg_len = tcp_seg.length_in_sequence_space();
+            if (_sender_window_size >= seg_len) {
+                _segments_out.push(tcp_seg);
+                start_seqno += seg_len;
+                
+                // 添加计时器，加入 _outstanding_segments
+                _timer_start = _ms_alive;
+                _outstanding_segments.insert(tcp_seg);
+                // 维护 _next_seqno 和 _bytes_in_flight
+                _bytes_in_flight += seg_len;
+                _next_seqno = std::max(start_seqno, _next_seqno);
+                _sender_window_size -= seg_len;
+            }
         }
     }
 }
