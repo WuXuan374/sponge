@@ -38,24 +38,34 @@ uint64_t TCPSender::bytes_in_flight() const {
 }
 
 void TCPSender::fill_window() {
-    send_segments(_next_seqno, std::min(_stream.buffer_size(), _receiver_window_size));
+    // 文档中说明，当接收方的 window size 为 0 时，要将其视作 1
+    // 发送一个可能被 reject 的 segment, 从而得到 window size 的更新
+    uint64_t window_size = _receiver_window_size > 1 ? _receiver_window_size : 1;
+    send_segments(_next_seqno, std::min(_stream.buffer_size(), window_size));
 }
 
 //! \param ackno The remote receiver's ackno (acknowledgment number)
 //! \param window_size The remote receiver's advertised window size
 void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_size) { 
     _receiver_window_size = window_size;
-    if (ackno.raw_value() > _next_seqno) {
-        _next_seqno = unwrap(ackno, _isn, _next_seqno);
+    if (_receiver_ackno == SIZE_MAX || ackno.raw_value() > _receiver_ackno) {
+        // receiver a bigger ackno, indicating the receipt of new data
+        _receiver_ackno = ackno.raw_value();
         _retranmission_timeout = _initial_retransmission_timeout;
         _consecutive_retransmissions = 0;
-        // 遍历 _outstanding_segments, 尝试移除已经被 ack 的
-        for (auto it = _outstanding_segments.begin(); it != _outstanding_segments.end(); it++) {
+
+        // 如果找到被 ack 的报文，注意维护 _outstanding_segments
+        auto it = _outstanding_segments.begin();
+        while (it != _outstanding_segments.end()) {
             TCPSegment seg = *it;
             if (seg.header().seqno.raw_value() + seg.length_in_sequence_space() <= ackno.raw_value()) {
+                _bytes_in_flight -= seg.length_in_sequence_space();
+                auto next_it = std::next(it, 1);
                 _outstanding_segments.erase(it);
+                it = next_it;
+            } else {
+                it++;
             }
-            // 不能提早跳出循环；有可能 seqno 更大的 segments, 因为其长度较小，所以被 ack
         }
         if (_outstanding_segments.empty()) {
             // 所有的 outstanding segments 都 ack 了, 则清除计时器（将其设为初始值）
@@ -86,7 +96,7 @@ void TCPSender::tick(const size_t ms_since_last_tick) {
 
             // 重传 seqno 最小的 Segment
             TCPSegment seg_min = *(_outstanding_segments.begin());
-            send_segment(seg_min);
+            resend_segment(seg_min);
         }
     }
  }
@@ -106,18 +116,44 @@ void TCPSender::send_empty_segment() {
     // 把 segment 写入 _segments_out, 就视作完成了 segment 的发送
     _segments_out.push(tcp_seg);
 
-    _next_seqno += tcp_seg.length_in_sequence_space();
-    _bytes_in_flight += tcp_seg.length_in_sequence_space();;
-    // 发送 empty segment 时，不需要启动计时器, 也不需要将其写入 outstanding_segments 中
+    // 检查 segment 的长度，如果大于 0（存在 SYN 或 FIN），则需要加入 _outstand_segments 中，并维护 seqno 和 _bytes_in_flight
+    size_t seg_len = tcp_seg.length_in_sequence_space();
+    if (seg_len > 0) {
+        _next_seqno += seg_len;
+        _bytes_in_flight += seg_len;
+        _timer_start = _ms_alive;
+        _outstanding_segments.insert(tcp_seg);
+    }
+    
+    // 如果是 empty segment, 则不需要后续处理了
 }
 
 //! \param[in] start_seqno (absolute sequence number)
 //! \param[in] data_len length of payload
-//! TODO:函数调用处，需要完成参数的检查
+//! data_len 可能为 0; 如果最后发现 segment 长度为 0, 则不发送
+//! 有可能 payload 长度为 0, 但是带有 SYN/FIN flag, 这种仍然要发送
 void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
     // 特殊情况
     if (data_len == 0) {
-        send_empty_segment();
+        TCPSegment tcp_seg;
+        if (start_seqno == 0) {
+            tcp_seg.header().syn = true;
+        }
+        tcp_seg.header().seqno = wrap(start_seqno, _isn);
+        if (_stream.input_ended() && _stream.buffer_empty()) {
+            tcp_seg.header().fin = true;
+        }
+        // 只发送非空的 segment
+        if (tcp_seg.length_in_sequence_space() > 0) {
+            _segments_out.push(tcp_seg);
+            start_seqno += tcp_seg.length_in_sequence_space();
+            // 添加计时器，加入 _outstanding_segments
+            _timer_start = _ms_alive;
+            _outstanding_segments.insert(tcp_seg);
+            // 维护 _next_seqno 和 _bytes_in_flight
+            _bytes_in_flight += tcp_seg.length_in_sequence_space();
+            _next_seqno = std::max(start_seqno, _next_seqno);
+        }
     } else {
         while (data_len > 0) {
             TCPSegment tcp_seg;
@@ -137,16 +173,20 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
             // 添加计时器，加入 _outstanding_segments
             _timer_start = _ms_alive;
             _outstanding_segments.insert(tcp_seg);
+            // 维护 _next_seqno 和 _bytes_in_flight
+            _bytes_in_flight += tcp_seg.length_in_sequence_space();
+            _next_seqno = std::max(start_seqno, _next_seqno);
         }
     }
 }
 
-void TCPSender::send_segment(TCPSegment seg) {
+//! 重传一个 segment, 应该不需要维护 _next_seqno 和 _bytes_in_flight 了
+//! TODO: 是否还需要检查 window size?
+void TCPSender::resend_segment(TCPSegment seg) {
     _segments_out.push(seg);
-    // Set 本身是有去重能力的
-    _outstanding_segments.insert(seg);
-
     // reset timer
     _timer_start = _ms_alive;
+    // Set 本身是有去重能力的
+    _outstanding_segments.insert(seg);
 }
 // TODO: 我感觉计时器不是全局的，有问题这里

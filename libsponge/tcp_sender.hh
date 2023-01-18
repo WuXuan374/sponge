@@ -58,6 +58,8 @@ class TCPSender {
     //! 文档中说，当 Sender 还没有收到 ack 时，将 receiver window size 假设成 1
     uint64_t _receiver_window_size{1};
 
+    uint64_t _receiver_ackno{SIZE_MAX};
+
     uint64_t _bytes_in_flight{0};
 
     //! 给出起始 seqno 和数据的整体长度
@@ -65,7 +67,7 @@ class TCPSender {
     void send_segments(uint64_t start_seqno, uint64_t data_len);
 
     //! 已经把 Segment 配置好了，只要将其写入 _segments_out 和 _outstanding_segments 即可
-    void send_segment(TCPSegment seg);
+    void resend_segment(TCPSegment seg);
 
   public:
     //! Initialize a TCPSender
