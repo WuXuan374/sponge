@@ -92,7 +92,7 @@ void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_si
 void TCPSender::tick(const size_t ms_since_last_tick) { 
     _ms_alive += ms_since_last_tick;
     // 如果有计时器，并且超时了
-    if (_timer_start != SIZE_MAX && _ms_alive - _timer_start > _retranmission_timeout) {
+    if (_timer_start != SIZE_MAX && _ms_alive - _timer_start >= _retranmission_timeout) {
         if (_outstanding_segments.empty()) {
             cout << "ERROR tick(): " << "timeout, but _outstanding_segments is empty" << endl;
         } else {
@@ -192,12 +192,12 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
 }
 
 //! 重传一个 segment, 应该不需要维护 _next_seqno 和 _bytes_in_flight 了
-//! TODO: 是否还需要检查 window size?
+//! 是否还需要检查 window size? 我认为是不需要的，之前发送该 segment 时就已经考虑了其对于 window 的占用；现在重传，并没有多占据 window
 void TCPSender::resend_segment(TCPSegment seg) {
+    // 调用处已经确保了这个 seg 来自 _outstanding_segments, 故不需要再次加入
+    // 同时，我们发现 set 对于 TCPSegment 并不能去重
     _segments_out.push(seg);
     // reset timer
     _timer_start = _ms_alive;
-    // Set 本身是有去重能力的
-    _outstanding_segments.insert(seg);
 }
 // TODO: 我感觉计时器不是全局的，有问题这里
