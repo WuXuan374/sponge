@@ -48,9 +48,10 @@ void TCPSender::fill_window() {
 //! \param window_size The remote receiver's advertised window size
 void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_size) { 
     _receiver_window_size = window_size;
-    if (_receiver_ackno == SIZE_MAX || ackno.raw_value() > _receiver_ackno) {
+    uint64_t absolute_ackno = unwrap(ackno, _isn, _receiver_ackno != SIZE_MAX ? _receiver_ackno : 0);
+    if (_receiver_ackno == SIZE_MAX || absolute_ackno > _receiver_ackno) {
         // receiver a bigger ackno, indicating the receipt of new data
-        _receiver_ackno = ackno.raw_value();
+        _receiver_ackno = absolute_ackno;
         _retranmission_timeout = _initial_retransmission_timeout;
         _consecutive_retransmissions = 0;
 
@@ -58,7 +59,7 @@ void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_si
         auto it = _outstanding_segments.begin();
         while (it != _outstanding_segments.end()) {
             TCPSegment seg = *it;
-            if (seg.header().seqno.raw_value() + seg.length_in_sequence_space() <= ackno.raw_value()) {
+            if (unwrap(seg.header().seqno, _isn, _next_seqno) + seg.length_in_sequence_space() <= _receiver_ackno) {
                 _bytes_in_flight -= seg.length_in_sequence_space();
                 auto next_it = std::next(it, 1);
                 _outstanding_segments.erase(it);
@@ -82,6 +83,7 @@ void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_si
 
 //! \param[in] ms_since_last_tick the number of milliseconds since the last call to this method
 //! 在这个函数中，_outstanding_segments 中存储的都是还没 ack 的 segments; 统一在 ack_received 函数中处理被 ack 的 segments
+// TODO: 这个 _ms_alive 和 _timer_start 是不是也得考虑越界的情况
 void TCPSender::tick(const size_t ms_since_last_tick) { 
     _ms_alive += ms_since_last_tick;
     // 如果有计时器，并且超时了

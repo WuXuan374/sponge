@@ -33,6 +33,7 @@ class TCPSender {
     //! 连续重传次数
     size_t _consecutive_retransmissions{0};
 
+    //! TODO: 这里应该根据 absolute number 进行比较
     struct cmp {
       bool operator() (TCPSegment a, TCPSegment b) const {
         return a.header().seqno.raw_value() <= b.header().seqno.raw_value();
@@ -58,6 +59,7 @@ class TCPSender {
     //! 文档中说，当 Sender 还没有收到 ack 时，将 receiver window size 假设成 1
     uint64_t _receiver_window_size{1};
 
+    //! 同样存放 absolute sequence number 进行比较!
     uint64_t _receiver_ackno{SIZE_MAX};
 
     uint64_t _bytes_in_flight{0};
