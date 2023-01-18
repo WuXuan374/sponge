@@ -16,6 +16,8 @@
 
 //! TODO: _next_seqno: 每次发送 segments 之后，需要维护
 //! TODO: _bytes_in_flight: 每次发送 segments 之后，或者收到 ack 之后，需要维护
+//! TODO: sequence number 的加减和比较
+//! TODO: 收到 _receiver_window_size 之后, 每次 Sender 发送数据后，需要维护 _receiver_window_size; 直到下一次收到 _receiver_window_size
 
 template <typename... Targs>
 void DUMMY_CODE(Targs &&... /* unused */) {}
@@ -37,6 +39,7 @@ uint64_t TCPSender::bytes_in_flight() const {
     return _bytes_in_flight;
 }
 
+//! 每次收到 ack 之后调用该方法，故可以确认该方法中的 _receiver_window_size 是最新的，无需再减去 bytes_in_flight
 void TCPSender::fill_window() {
     // 文档中说明，当接收方的 window size 为 0 时，要将其视作 1
     // 发送一个可能被 reject 的 segment, 从而得到 window size 的更新
@@ -105,6 +108,7 @@ void TCPSender::tick(const size_t ms_since_last_tick) {
 
 unsigned int TCPSender::consecutive_retransmissions() const { return _consecutive_retransmissions; }
 
+//! 数据长度非空时，注意维护 _receiver_window_size
 void TCPSender::send_empty_segment() {
     // 同样要有 SYN 和 FIN 的检查
     TCPSegment tcp_seg;
@@ -125,6 +129,7 @@ void TCPSender::send_empty_segment() {
         _bytes_in_flight += seg_len;
         _timer_start = _ms_alive;
         _outstanding_segments.insert(tcp_seg);
+        _receiver_window_size = (_receiver_window_size < seg_len) ? 0: _receiver_window_size - seg_len;
     }
     
     // 如果是 empty segment, 则不需要后续处理了
@@ -155,6 +160,7 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
             // 维护 _next_seqno 和 _bytes_in_flight
             _bytes_in_flight += tcp_seg.length_in_sequence_space();
             _next_seqno = std::max(start_seqno, _next_seqno);
+            _receiver_window_size = (_receiver_window_size < tcp_seg.length_in_sequence_space()) ? 0: _receiver_window_size - tcp_seg.length_in_sequence_space();
         }
     } else {
         while (data_len > 0) {
@@ -178,6 +184,7 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
             // 维护 _next_seqno 和 _bytes_in_flight
             _bytes_in_flight += tcp_seg.length_in_sequence_space();
             _next_seqno = std::max(start_seqno, _next_seqno);
+            _receiver_window_size = (_receiver_window_size < tcp_seg.length_in_sequence_space()) ? 0: _receiver_window_size - tcp_seg.length_in_sequence_space();
         }
     }
 }
