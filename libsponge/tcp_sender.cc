@@ -43,14 +43,16 @@ uint64_t TCPSender::bytes_in_flight() const {
 void TCPSender::fill_window() {
     // 文档中说明，当接收方的 window size 为 0 时，要将其视作 1
     // 发送一个可能被 reject 的 segment, 从而得到 window size 的更新
-    uint64_t window_size = _receiver_window_size > 1 ? _receiver_window_size : 1;
-    send_segments(_next_seqno, std::min(_stream.buffer_size(), window_size));
+    send_segments(_next_seqno, std::min(_stream.buffer_size(), _sender_window_size));
 }
 
 //! \param ackno The remote receiver's ackno (acknowledgment number)
 //! \param window_size The remote receiver's advertised window size
 void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_size) { 
-    _receiver_window_size = window_size;
+    // 如文档所述，receiver window size 为 0 时，将其视作 1
+    _receiver_window_size = (window_size == 0) ? 1 : window_size;
+    // 相应更新 sender window size
+    _sender_window_size = _receiver_window_size;
     uint64_t absolute_ackno = unwrap(ackno, _isn, _receiver_ackno != SIZE_MAX ? _receiver_ackno : 0);
     if (_receiver_ackno == SIZE_MAX || absolute_ackno > _receiver_ackno) {
         // receiver a bigger ackno, indicating the receipt of new data
@@ -129,7 +131,7 @@ void TCPSender::send_empty_segment() {
         _bytes_in_flight += seg_len;
         _timer_start = _ms_alive;
         _outstanding_segments.insert(tcp_seg);
-        _receiver_window_size = (_receiver_window_size < seg_len) ? 0: _receiver_window_size - seg_len;
+        _sender_window_size = (_sender_window_size < seg_len) ? 0: _sender_window_size - seg_len;
     }
     
     // 如果是 empty segment, 则不需要后续处理了
@@ -160,7 +162,7 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
             // 维护 _next_seqno 和 _bytes_in_flight
             _bytes_in_flight += tcp_seg.length_in_sequence_space();
             _next_seqno = std::max(start_seqno, _next_seqno);
-            _receiver_window_size = (_receiver_window_size < tcp_seg.length_in_sequence_space()) ? 0: _receiver_window_size - tcp_seg.length_in_sequence_space();
+            _sender_window_size = (_sender_window_size < tcp_seg.length_in_sequence_space()) ? 0: _sender_window_size - tcp_seg.length_in_sequence_space();
         }
     } else {
         while (data_len > 0) {
@@ -184,7 +186,7 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
             // 维护 _next_seqno 和 _bytes_in_flight
             _bytes_in_flight += tcp_seg.length_in_sequence_space();
             _next_seqno = std::max(start_seqno, _next_seqno);
-            _receiver_window_size = (_receiver_window_size < tcp_seg.length_in_sequence_space()) ? 0: _receiver_window_size - tcp_seg.length_in_sequence_space();
+            _sender_window_size = (_sender_window_size < tcp_seg.length_in_sequence_space()) ? 0: _sender_window_size - tcp_seg.length_in_sequence_space();
         }
     }
 }
