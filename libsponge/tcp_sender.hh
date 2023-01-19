@@ -87,6 +87,9 @@ class TCPSender {
     //! 体现为 SYN flag > payload > FIN flag
     TCPSegment construct_segment(uint64_t seqno, uint64_t payload_len);
 
+    //! 检查 seqno 是否合法，若不合法，则不应该发送这个 segment
+    bool check_seqno(uint64_t seqno);
+
   public:
     //! Initialize a TCPSender
     TCPSender(const size_t capacity = TCPConfig::DEFAULT_CAPACITY,

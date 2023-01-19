@@ -120,8 +120,7 @@ unsigned int TCPSender::consecutive_retransmissions() const { return _consecutiv
 
 //! 数据长度非空时，注意维护 _receiver_window_size
 void TCPSender::send_empty_segment() {
-    if (_fin_acked) {
-        // FIN 已经发送过了，这时候不应该再发送 empty segment 吧
+    if (!check_seqno(_next_seqno)) {
         return;
     }
 
@@ -149,15 +148,11 @@ void TCPSender::send_empty_segment() {
 //! data_len 可能为 0; 如果最后发现 segment 长度为 0, 则不发送
 //! 有可能 payload 长度为 0, 但是带有 SYN/FIN flag, 这种仍然要发送
 void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
-    if (_fin_acked) {
+    if (!check_seqno(start_seqno)) {
         return;
     }
     // 特殊情况
     if (data_len == 0) {
-        if (start_seqno >= _stream.bytes_written() + 2) {
-            return;
-        }
-
         TCPSegment tcp_seg = construct_segment(start_seqno, 0);
         size_t seg_len = tcp_seg.length_in_sequence_space();
 
@@ -177,10 +172,6 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
         }
     } else {
         while (data_len > 0) {
-            if (start_seqno >= _stream.bytes_written() + 2) {
-                return;
-            }
-           
             uint64_t payload_len = std::min(data_len, TCPConfig::MAX_PAYLOAD_SIZE);
             data_len -= payload_len;
             TCPSegment tcp_seg = construct_segment(start_seqno, payload_len);
@@ -230,4 +221,16 @@ TCPSegment TCPSender::construct_segment(uint64_t seqno, uint64_t payload_len) {
         tcp_seg.header().fin = true;
     }
     return tcp_seg;
+}
+
+bool TCPSender::check_seqno(uint64_t seqno) {
+    // 已经发送了 FIN 并收到了对应的 ACK，不应该再发送数据了
+    if (_fin_acked) {
+        return false;
+    }
+    // 不合法的 seqno (哪怕是发送带 FIN 的 segment, sender 的 seqno 最多是 bytes_written()+1)
+    if (seqno >= _stream.bytes_written() + 2) {
+        return false;
+    }
+    return true;
 }

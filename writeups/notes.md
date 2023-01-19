@@ -48,3 +48,6 @@ ByteStream &stream_in() { return _stream; }
     - 由于 window size 有限，因此 segment 中的数据存在优先级
     - SYN flag 优先级最高，然后是 payload, 最后才是 FIN
     - 比如 window size = 3, len(payload) = 3, 已经到达stream 末尾；此时就不应该发送 FIN 符号，只发送 payload
+- 发送 segment 之前的检查:
+    - 如果已经发送了 FIN, 并收到了对应的 ack, 此时不应该发送 segment
+    - 如果这个 seqno 不合法，体现为过大（超出已读取的数据量），不发送
