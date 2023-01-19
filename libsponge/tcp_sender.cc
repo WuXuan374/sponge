@@ -124,16 +124,8 @@ void TCPSender::send_empty_segment() {
         // FIN 已经发送过了，这时候不应该再发送 empty segment 吧
         return;
     }
-    // 同样要有 SYN 和 FIN 的检查
-    TCPSegment tcp_seg;
-    tcp_seg.header().seqno = wrap(_next_seqno, _isn);
-    if (_next_seqno == 0) {
-        tcp_seg.header().syn = true;
-    }
-    // FIN 的优先级最低，在 window 还有剩余的情况下才添加该标记
-    if (_stream.input_ended() && _stream.buffer_empty() && tcp_seg.length_in_sequence_space() < _sender_window_size) {
-        tcp_seg.header().fin = true;
-    }
+
+    TCPSegment tcp_seg = construct_segment(_next_seqno, 0);
     size_t seg_len = tcp_seg.length_in_sequence_space();
     
     // window 足够 && 不在 _outstanding 队列中
@@ -165,16 +157,10 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
         if (start_seqno >= _stream.bytes_written() + 2) {
             return;
         }
-        TCPSegment tcp_seg;
-        if (start_seqno == 0) {
-            tcp_seg.header().syn = true;
-        }
-        tcp_seg.header().seqno = wrap(start_seqno, _isn);
-        // FIN 的优先级最低，在 window 还有剩余的情况下才添加该标记
-        if (_stream.input_ended() && _stream.buffer_empty() && tcp_seg.length_in_sequence_space() < _sender_window_size) {
-            tcp_seg.header().fin = true;
-        }
+
+        TCPSegment tcp_seg = construct_segment(start_seqno, 0);
         size_t seg_len = tcp_seg.length_in_sequence_space();
+
         // segment 非空 && window 足够 && 不在 _outstanding 队列中
         if (seg_len > 0 && _sender_window_size >= seg_len && _outstanding_segments.find(tcp_seg) == _outstanding_segments.end()) {
             start_seqno += seg_len;
@@ -194,20 +180,13 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
             if (start_seqno >= _stream.bytes_written() + 2) {
                 return;
             }
-            TCPSegment tcp_seg;
-            if (start_seqno == 0) {
-                tcp_seg.header().syn = true;
-            }
-            tcp_seg.header().seqno = wrap(start_seqno, _isn);
+           
             uint64_t payload_len = std::min(data_len, TCPConfig::MAX_PAYLOAD_SIZE);
             data_len -= payload_len;
-            tcp_seg.payload() = Buffer(_stream.read(payload_len));
-            // FIN 的优先级最低，在 window 还有剩余的情况下才添加该标记
-            if (_stream.input_ended() && _stream.buffer_empty() && tcp_seg.length_in_sequence_space() < _sender_window_size) {
-                tcp_seg.header().fin = true;
-            }
-            // window 足够 && 不在 _outstanding 队列中
+            TCPSegment tcp_seg = construct_segment(start_seqno, payload_len);
             size_t seg_len = tcp_seg.length_in_sequence_space();
+
+            // window 足够 && 不在 _outstanding 队列中
             if (_sender_window_size >= seg_len && _outstanding_segments.find(tcp_seg) == _outstanding_segments.end()) {
                 start_seqno += seg_len;
                 _next_seqno = std::max(start_seqno, _next_seqno);
@@ -235,4 +214,20 @@ void TCPSender::resend_segment(TCPSegment seg) {
     _segments_out.push(seg);
     // reset timer
     _timer_start = _ms_alive;
+}
+
+TCPSegment TCPSender::construct_segment(uint64_t seqno, uint64_t payload_len) {
+    TCPSegment tcp_seg;
+    tcp_seg.header().seqno = wrap(seqno, _isn);
+    if (seqno == 0) {
+        tcp_seg.header().syn = true;
+    }
+
+    tcp_seg.payload() = Buffer(_stream.read(payload_len));
+
+    // FIN 的优先级最低，在 window 还有剩余的情况下才添加该标记
+    if (_stream.input_ended() && _stream.buffer_empty() && tcp_seg.length_in_sequence_space() < _sender_window_size) {
+        tcp_seg.header().fin = true;
+    }
+    return tcp_seg;
 }

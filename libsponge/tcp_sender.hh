@@ -83,6 +83,10 @@ class TCPSender {
     //! 已经把 Segment 配置好了，只要将其写入 _segments_out 和 _outstanding_segments 即可
     void resend_segment(TCPSegment seg);
 
+    //! 由于 window 的限制，segment 的不同部分是存在优先级的
+    //! 体现为 SYN flag > payload > FIN flag
+    TCPSegment construct_segment(uint64_t seqno, uint64_t payload_len);
+
   public:
     //! Initialize a TCPSender
     TCPSender(const size_t capacity = TCPConfig::DEFAULT_CAPACITY,
