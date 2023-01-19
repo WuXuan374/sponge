@@ -90,6 +90,9 @@ class TCPSender {
     //! 检查 seqno 是否合法，若不合法，则不应该发送这个 segment
     bool check_seqno(uint64_t seqno);
 
+    //! 发送 segment 的时候需要维护一系列状态，统一放到这个函数中
+    void _send_segment(TCPSegment seg, uint64_t seqno);
+
   public:
     //! Initialize a TCPSender
     TCPSender(const size_t capacity = TCPConfig::DEFAULT_CAPACITY,

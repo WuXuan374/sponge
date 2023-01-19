@@ -51,3 +51,15 @@ ByteStream &stream_in() { return _stream; }
 - 发送 segment 之前的检查:
     - 如果已经发送了 FIN, 并收到了对应的 ack, 此时不应该发送 segment
     - 如果这个 seqno 不合法，体现为过大（超出已读取的数据量），不发送
+- 不要重复发送 segment
+    - 如果 segment 已经在 _outstanding_segments 中了，不要重复发送
+- 维护下列状态
+    - _segments_out: 写入数据，上层应用会读取，然后真正的发送这段数据
+    - _outstanding_segments: 已发送，但还没有 ack 的 segment 集合
+    - _next_seqno: 下一个正常发送的 segment 的起始序号 (不考虑重发)
+    - _bytes_in_flight: 发送中，还没收到 ack 的 bytes 数量;
+        - 和 _outstanding_segments 是对应的
+        - 用来计算 sender window size
+    - _sender_window_size
+#### Sender window size
+- 计算公式: _sender_window_size = _receiver_window_size - _bytes_in_flight
