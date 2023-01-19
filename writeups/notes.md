@@ -63,3 +63,4 @@ ByteStream &stream_in() { return _stream; }
     - _sender_window_size
 #### Sender window size
 - 计算公式: _sender_window_size = _receiver_window_size - _bytes_in_flight
+- 特别之处: 如果 _receiver_window_size == 0, 将其视作 1；目的是 window size 更新之后，能够得到更新之后的值

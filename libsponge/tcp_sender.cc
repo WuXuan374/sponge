@@ -10,12 +10,6 @@
 // For Lab 3, please replace with a real implementation that passes the
 // automated checks run by `make check_lab3`.
 
-//! 记住 TCPSegment 有以下内容需要特殊设置
-//! sequence number, SYN flag, payload, FIN flag
-//! 更新私有变量 _next_seqno
-
-//! TODO: 收到 _receiver_window_size 之后, 每次 Sender 发送数据后，需要维护 _receiver_window_size; 直到下一次收到 _receiver_window_size
-
 template <typename... Targs>
 void DUMMY_CODE(Targs &&... /* unused */) {}
 
@@ -35,12 +29,22 @@ uint64_t TCPSender::bytes_in_flight() const {
     return _bytes_in_flight;
 }
 
+//! 文档中提到，_receiver_window_size 为 0 时，将其视作 1
+uint64_t TCPSender::sender_window_size() const {
+    uint64_t recv_win_size = (_receiver_window_size == 0) ? 1: _receiver_window_size;
+    if (recv_win_size >= _bytes_in_flight) {
+        return recv_win_size - _bytes_in_flight;
+    } else {
+        return 0;
+    }
+}
+
 //! 每次收到 ack 之后调用该方法，故可以确认该方法中的 _receiver_window_size 是最新的，无需再减去 bytes_in_flight
 void TCPSender::fill_window() {
     // 文档中说明，当接收方的 window size 为 0 时，要将其视作 1
     // 发送一个可能被 reject 的 segment, 从而得到 window size 的更新
     //! 阅读测试代码，发现 fill_window 会被单独调用，因此我们在 ack_received() 中不需要手动调用该函数
-    send_segments(_next_seqno, std::min(_stream.buffer_size(), _sender_window_size));
+    send_segments(_next_seqno, std::min(_stream.buffer_size(), sender_window_size()));
 }
 
 //! \param ackno The remote receiver's ackno (acknowledgment number)
@@ -53,8 +57,6 @@ void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_si
     }
 
     _receiver_window_size = window_size;
-    // 相应更新 sender window size; 如文档所述，receiver window size 为 0 时，将其视作 1
-    _sender_window_size = (_receiver_window_size == 0) ? 1 : _receiver_window_size;
     
     if (_receiver_ackno == SIZE_MAX || absolute_ackno > _receiver_ackno) {
         // receiver a bigger ackno, indicating the receipt of new data
@@ -90,8 +92,6 @@ void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_si
             _fin_acked = true;
         }
     }
-
-    _sender_window_size = (_sender_window_size >= _bytes_in_flight) ? _sender_window_size - _bytes_in_flight : 0;
 }
 
 //! \param[in] ms_since_last_tick the number of milliseconds since the last call to this method
@@ -128,7 +128,7 @@ void TCPSender::send_empty_segment() {
     size_t seg_len = tcp_seg.length_in_sequence_space();
     
     // window 足够 && 不在 _outstanding 队列中
-    if (_sender_window_size >= seg_len && _outstanding_segments.find(tcp_seg) == _outstanding_segments.end()) {
+    if (sender_window_size() >= seg_len && _outstanding_segments.find(tcp_seg) == _outstanding_segments.end()) {
         // 这里头多了一个长度为 0 的 segment, 不加入 _outstanding, 但是仍然发送的规则，因此单独出来
         _segments_out.push(tcp_seg);
         if (seg_len > 0) {
@@ -139,7 +139,6 @@ void TCPSender::send_empty_segment() {
             _outstanding_segments.insert(tcp_seg);
             _next_seqno += seg_len;
             _bytes_in_flight += seg_len;
-            _sender_window_size -= seg_len;
         }
     }
 }
@@ -158,7 +157,7 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
         size_t seg_len = tcp_seg.length_in_sequence_space();
 
         // segment 非空 && window 足够 && 不在 _outstanding 队列中
-        if (seg_len > 0 && _sender_window_size >= seg_len && _outstanding_segments.find(tcp_seg) == _outstanding_segments.end()) {
+        if (seg_len > 0 && sender_window_size() >= seg_len && _outstanding_segments.find(tcp_seg) == _outstanding_segments.end()) {
             _send_segment(tcp_seg, start_seqno);
             start_seqno += seg_len;
         }
@@ -170,7 +169,7 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
             size_t seg_len = tcp_seg.length_in_sequence_space();
 
             // window 足够 && 不在 _outstanding 队列中
-            if (_sender_window_size >= seg_len && _outstanding_segments.find(tcp_seg) == _outstanding_segments.end()) {
+            if (sender_window_size() >= seg_len && _outstanding_segments.find(tcp_seg) == _outstanding_segments.end()) {
                 _send_segment(tcp_seg, start_seqno);
                 start_seqno += seg_len;
             }
@@ -199,12 +198,12 @@ TCPSegment TCPSender::construct_segment(uint64_t seqno, uint64_t payload_len) {
     }
     
     // payload 的优先级次之
-    if (tcp_seg.length_in_sequence_space() + payload_len <= _sender_window_size) {
+    if (tcp_seg.length_in_sequence_space() + payload_len <= sender_window_size()) {
         tcp_seg.payload() = Buffer(_stream.read(payload_len));
     }
 
     // FIN 的优先级最低，在 window 还有剩余的情况下才添加该标记
-    if (_stream.input_ended() && _stream.buffer_empty() && tcp_seg.length_in_sequence_space() < _sender_window_size) {
+    if (_stream.input_ended() && _stream.buffer_empty() && tcp_seg.length_in_sequence_space() < sender_window_size()) {
         tcp_seg.header().fin = true;
     }
     return tcp_seg;
@@ -228,7 +227,6 @@ void TCPSender::_send_segment(TCPSegment seg, uint64_t start_seqno) {
     _outstanding_segments.insert(seg);
     _next_seqno = std::max(start_seqno + seg_len, _next_seqno);
     _bytes_in_flight += seg_len;
-    _sender_window_size -= seg_len;
     if (seg_len > 0 && _timer_start == SIZE_MAX) {
         _timer_start = _ms_alive;
     }

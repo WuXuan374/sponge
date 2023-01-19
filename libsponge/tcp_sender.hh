@@ -64,8 +64,7 @@ class TCPSender {
     //! 文档中说，当 Sender 还没有收到 ack 时，将 receiver window size 假设成 1
     uint64_t _receiver_window_size{1};
 
-    //! 发送方的 window size
-    uint64_t _sender_window_size{1};
+    uint64_t sender_window_size() const;
 
     //! 同样存放 absolute sequence number 进行比较!
     uint64_t _receiver_ackno{SIZE_MAX};
