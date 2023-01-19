@@ -85,6 +85,13 @@ void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_si
             _timer_start = _ms_alive;
         }
     }
+
+    // 检查是否发送了 FIN, 并收到对应的 ack
+    if (_stream.input_ended() && _stream.buffer_empty()) {
+        if (_next_seqno == _stream.bytes_written() + 2 && _next_seqno == _receiver_ackno) {
+            _fin_acked = true;
+        }
+    }
 }
 
 //! \param[in] ms_since_last_tick the number of milliseconds since the last call to this method
@@ -113,6 +120,9 @@ unsigned int TCPSender::consecutive_retransmissions() const { return _consecutiv
 
 //! 数据长度非空时，注意维护 _receiver_window_size
 void TCPSender::send_empty_segment() {
+    if (_fin_acked) {
+        return;
+    }
     // 同样要有 SYN 和 FIN 的检查
     TCPSegment tcp_seg;
     tcp_seg.header().seqno = wrap(_next_seqno, _isn);
@@ -144,6 +154,9 @@ void TCPSender::send_empty_segment() {
 //! data_len 可能为 0; 如果最后发现 segment 长度为 0, 则不发送
 //! 有可能 payload 长度为 0, 但是带有 SYN/FIN flag, 这种仍然要发送
 void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
+    if (_fin_acked) {
+        return;
+    }
     // 特殊情况
     if (data_len == 0) {
         TCPSegment tcp_seg;
@@ -201,6 +214,9 @@ void TCPSender::send_segments(uint64_t start_seqno, uint64_t data_len) {
 //! 重传一个 segment, 应该不需要维护 _next_seqno 和 _bytes_in_flight 了
 //! 是否还需要检查 window size? 我认为是不需要的，之前发送该 segment 时就已经考虑了其对于 window 的占用；现在重传，并没有多占据 window
 void TCPSender::resend_segment(TCPSegment seg) {
+    if (_fin_acked) {
+        return;
+    }
     // 调用处已经确保了这个 seg 来自 _outstanding_segments, 故不需要再次加入
     // 同时，我们发现 set 对于 TCPSegment 并不能去重
     _segments_out.push(seg);

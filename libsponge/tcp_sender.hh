@@ -67,6 +67,10 @@ class TCPSender {
 
     uint64_t _bytes_in_flight{0};
 
+    //! 已经发送了 FIN, 并且收到对应的 ack
+    //! 则连接已经终止，应该停止发送 segments
+    bool _fin_acked{false};
+
     //! 给出起始 seqno 和数据的整体长度
     //! 将数据转成1个或多个 TCPSegment, 进行发送
     void send_segments(uint64_t start_seqno, uint64_t data_len);
