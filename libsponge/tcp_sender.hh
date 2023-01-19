@@ -36,7 +36,12 @@ class TCPSender {
     //! TODO: 这里应该根据 absolute number 进行比较
     struct cmp {
       bool operator() (TCPSegment a, TCPSegment b) const {
-        return a.header().seqno.raw_value() <= b.header().seqno.raw_value();
+        if (a.header().seqno.raw_value() < b.header().seqno.raw_value()) {
+          return true;
+        } else if (a.length_in_sequence_space() < b.length_in_sequence_space()){
+          return true;
+        }
+        return false;
       }
     };
 
