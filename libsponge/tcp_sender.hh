@@ -28,7 +28,7 @@ class TCPSender {
     size_t _ms_alive{0};
 
     //! 计时器的开始时间
-    size_t _timer_start;
+    size_t _timer_start{SIZE_MAX};
 
     //! 连续重传次数
     size_t _consecutive_retransmissions{0};
