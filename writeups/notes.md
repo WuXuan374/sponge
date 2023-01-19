@@ -97,5 +97,72 @@ ByteStream &stream_in() { return _stream; }
 - outstanding segments 被 ack 了
     - 相应操作: RTO 设为初值、从队列（集合）中移除、consecutive_retransmission 设为 0
     - 如果所有 segments 都被 ack, 则清除 timer; 否则重新启动一个 timer
-### 细节补充
-- 
+
+# 一些非代码问题的处理
+## 磁盘空间不够:
+- 删除 /var/log 底下的文件，相对比较安全
+    - 特别是 /var/log/journal 底下的 log, 占据了很大空间
+```shell
+sudo journalctl --vacuum-size=50M
+```
+- 这个命令删除 /var/log/journal 下 旧的 Log, 使得 log 总大小不超过 50M
+
+## UTM 虚拟机环境搭建
+
+### ssh 的连接
+- 参考 https://medium.com/@lizrice/linux-vms-on-an-m1-based-mac-with-vscode-and-utm-d73e7cb06133, 设置端口映射
+- 参考 https://docs.getutm.app/guides/ubuntu/#networking-is-unavailable, 网络设置
+- 我将虚拟机的TCP端口映射到 127.0.0.1:2222 上
+```shell
+ssh cs144@127.0.0.1 -p 2222
+```
+- 然后就可以用 VSCode, 通过 ssh 连接到 VM 上了
+### 设置一个共享文件夹
+- CS144/shared
+- 直接挂载在 ~/shared 位置
+
+## gdb 调试工具
+- 参考1: https://cs144.github.io/lab_faq.html
+- 好像装不上，有空再看吧
+- 国外源网络连不上，然后本机的代理不知道为啥也连不上，只能换成清华源
+    - https://mirrors.tuna.tsinghua.edu.cn/help/ubuntu-ports/ 按照这里的说明修改配置文件: **注意，需要把配置文件中的 https 都改成 http**
+    - 然后先跑一下 `sudo apt-get update`
+    - 随后再运行 `sudo apt-get install gdb`
+    - 本机的代理：在 clashX 文件中，"设置" -- “允许来自局域网的连接” 即可
+- 然后就是找到对应的文件，打断点，然后根据图形界面去调试；左边会展示各种变量信息，等于不需要自己去手动 print 了
+- launch.json 的内容
+```json
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "sponge debug",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/${fileBasenameNoExtension}",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "miDebuggerPath": "/usr/bin/gdb"
+        }
+    ]
+}
+```
+
+## 关于单元测试
+- [FAQ](https://cs144.github.io/lab_faq.html) 说可以自己写单元测试文件，但是我试了一下会报错
+- 可以直接在已有的单元测试文件中加一些自己的测试，然后正常运行 `make check_lab{k}` 就行
+
