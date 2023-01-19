@@ -61,6 +61,41 @@ ByteStream &stream_in() { return _stream; }
         - 和 _outstanding_segments 是对应的
         - 用来计算 sender window size
     - _sender_window_size
+    - 如果之前没有计时器，则启动一个计时器
 #### Sender window size
 - 计算公式: _sender_window_size = _receiver_window_size - _bytes_in_flight
 - 特别之处: 如果 _receiver_window_size == 0, 将其视作 1；目的是 window size 更新之后，能够得到更新之后的值
+#### fill window
+- 如果 stream 中有数据，并且发送端的 window size 有空间，就能传多少数据传多少
+- 可能要将数据划分成多个 segments
+
+
+### 收到 ACK 之后的处理
+- 检查: 忽略 ack 不合理的报文（比 next seqno 更大）
+- 更新: Receiver window size, ackno(如果更大)
+- 维护状态:
+    - RTO 回归初值
+    - 连续重传次数置为 0
+- 检查 _outstanding_segments, 看看哪些报文被 ack 了
+    - 被 ack 的需要从 _outstanding_segments 中移除，并维护 _bytes_in_flight
+- 计时器处理: 取消计时（没有 outstanding segment 了）或重启计时器（还有 segment 剩下）
+- 维护 FIN ACKED 状态
+
+### 怎么检查是否需要重传 segment
+- 有一个 tick() 方法，应该是定时被调用的，在这个方法中进行重传检查
+- 如果存在计时器并且超时了
+    - 如果不是 Receiver window size 导致的（说明应该是传输的故障，而不是接收方的问题），则将 RTO 加倍，连续重传次数 + 1
+    - 重传 sequence number 最小的 segment
+
+### 总结计时器的生命周期
+- timer 是针对所有 outstanding segments 的，并不是针对某个 segment 的
+- 每次发送一个非空 segment 时(长度不为 0)
+    - 如果 **没有正在运行的 timer**, 则启动一个 timer
+- timer 超时 (在 tick() 中发现)
+    - 相应操作: 重传，RTO 翻倍、记录连续重传次数
+    - 重新启动一个 timer
+- outstanding segments 被 ack 了
+    - 相应操作: RTO 设为初值、从队列（集合）中移除、consecutive_retransmission 设为 0
+    - 如果所有 segments 都被 ack, 则清除 timer; 否则重新启动一个 timer
+### 细节补充
+- 
