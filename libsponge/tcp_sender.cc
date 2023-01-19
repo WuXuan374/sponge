@@ -52,10 +52,9 @@ void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_si
         return;
     }
 
-    // 如文档所述，receiver window size 为 0 时，将其视作 1
-    _receiver_window_size = (window_size == 0) ? 1 : window_size;
-    // 相应更新 sender window size
-    _sender_window_size = _receiver_window_size;
+    _receiver_window_size = window_size;
+    // 相应更新 sender window size; 如文档所述，receiver window size 为 0 时，将其视作 1
+    _sender_window_size = (_receiver_window_size == 0) ? 1 : _receiver_window_size;
     
     if (_receiver_ackno == SIZE_MAX || absolute_ackno > _receiver_ackno) {
         // receiver a bigger ackno, indicating the receipt of new data
