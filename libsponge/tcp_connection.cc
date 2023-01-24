@@ -43,6 +43,8 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
         _receiver.stream_out().set_error();
         // TODO: kill the connection, 可能需要整理成一个函数
         _connection_alive = false;
+        // 接下来发送的 segment 要带上 _rst_flag
+        _need_sent_rst = true;
     }
     _receiver.segment_received(seg);
     if (seg.header().ack) {
@@ -77,6 +79,7 @@ size_t TCPConnection::write(const string &data) {
     size_t len = _sender.stream_in().write(data);
     _sender.fill_window();
     // TODO: ACK flag 的设置如何实现？并且需要把 segment 写入 _segments_out ?
+    push_segments_out();
     return len;
 }
 
@@ -96,6 +99,7 @@ void TCPConnection::tick(const size_t ms_since_last_tick) {
         // TODO: close connection
         // TODO: empty segment 怎么带上 RST flag?
         _sender.send_empty_segment();
+        _need_sent_rst = true;
     }
 }
 
@@ -128,4 +132,28 @@ bool TCPConnection::invalid_sequence_number(WrappingInt32 seqno) {
         return _receiver.ackno().value() - seqno > 0;
     }
     return false;
+}
+
+void TCPConnection::push_segments_out() {
+    // TODO: 维护 _need_sent_rst
+    size_t available_window_size = _receiver.window_size();
+    while (!_sender.segments_out().empty() && available_window_size > 0) {
+        TCPSegment tcp_seg = _sender.segments_out().front();
+        // 维护 ACK flag
+        if (_receiver.ackno().has_value()) {
+            tcp_seg.header().ack = true;
+        } 
+        if (_need_sent_rst) {
+            tcp_seg.header().rst = true;
+        }
+        if (tcp_seg.length_in_sequence_space() > available_window_size) {
+            // 超过 window size, 这个 segment 发送失败
+            break;
+        } else {
+            _segments_out.push(tcp_seg);
+            // 维护相应状态
+            _sender.segments_out().pop();
+            available_window_size -= tcp_seg.length_in_sequence_space();
+        }
+    }
 }

@@ -30,9 +30,16 @@ class TCPConnection {
     //! 连接是否 alive
     bool _connection_alive{false};
 
+    //! 发送的 segment 是否需要带上 RST flag
+    bool _need_sent_rst{false};
+
     //! 检查发送方的 seqno 是否不合法
     //! 不合法: 约定为比 ackno 更小的
     bool invalid_sequence_number(WrappingInt32 seqno);
+
+    //! 从 sender 的队列中读取 segment, 并将其写入 connection 的 _segments_out
+    //! 需要维护一些状态，比如 RST, ACK 等
+    void push_segments_out();
 
   public:
     //! \name "Input" interface for the writer
