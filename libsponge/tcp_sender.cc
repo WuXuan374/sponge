@@ -121,12 +121,17 @@ void TCPSender::tick(const size_t ms_since_last_tick) {
 unsigned int TCPSender::consecutive_retransmissions() const { return _consecutive_retransmissions; }
 
 //! 数据长度非空时，注意维护 _receiver_window_size
+//! TODO: 需要传一个 invalid sequence number, 那么就传一个比 ack 更小的吧
 void TCPSender::send_empty_segment() {
     if (!check_seqno(_next_seqno)) {
         return;
     }
 
-    TCPSegment tcp_seg = construct_segment(_next_seqno, 0);
+    // TCPSegment tcp_seg = construct_segment(_next_seqno, 0);
+    TCPSegment tcp_seg = construct_segment(
+        _receiver_ackno - 1,
+        0
+    );
     size_t seg_len = tcp_seg.length_in_sequence_space();
     
     // window 足够 && 不在 _outstanding 队列中
