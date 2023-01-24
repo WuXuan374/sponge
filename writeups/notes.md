@@ -200,9 +200,18 @@ ByteStream &stream_in() { return _stream; }
 - 删除 /var/log 底下的文件，相对比较安全
     - 特别是 /var/log/journal 底下的 log, 占据了很大空间
 ```shell
-sudo journalctl --vacuum-size=50M
+sudo journalctl --vacuum-size=10M
 ```
-- 这个命令删除 /var/log/journal 下 旧的 Log, 使得 log 总大小不超过 50M
+- 这个命令删除 /var/log/journal 下 旧的 Log, 使得 log 总大小不超过 10M
+- 列出各文件夹所占据空间 -- 命令 `du`
+### 还可以删除
+- ~/.cache/vscode-cpptools 占据了非常大的空间(2.9G)
+- 这是C/C++ 插件的缓存文件存储的地址
+- 修改 VSCode 中 setting 的下述属性，可以限制最大使用空间
+    - 限制之后，会自动删除超出这个限制的缓存文件
+```json
+C_Cpp.intelliSenseCacheSize
+```
 
 ## UTM 虚拟机环境搭建
 
@@ -262,4 +271,13 @@ ssh cs144@127.0.0.1 -p 2222
 ## 关于单元测试
 - [FAQ](https://cs144.github.io/lab_faq.html) 说可以自己写单元测试文件，但是我试了一下会报错
 - 可以直接在已有的单元测试文件中加一些自己的测试，然后正常运行 `make check_lab{k}` 就行
-
+### 跑的太慢了
+- 原因还是自己有些东西没实现，导致 test 失败，就会很慢
+- workaround 是在 tests.cmake 中修改 timeout
+### lab4 的单元测试内容很多，终端里头看不到错误信息
+- 把运行结果重定向到一个文件
+```shell
+SomeCommand > SomeFile.txt  
+SomeCommand >> SomeFile.txt // 如果要追加内容
+command | tee output.txt // 建议用这个， terminal 上面仍然看得到
+```
