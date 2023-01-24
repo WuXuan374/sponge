@@ -1,6 +1,103 @@
 # 说明
 - 精简之前的笔记，既包括理论，也包括实现
 
+# c++ 语言知识
+- 如果要把一个 object 设置为 const, 则不能访问这个 object 的任何非 const 方法
+- wrapper type: a type that contains an inner type, but provides a different set of functions/operators
+
+# lab0
+## 整体工作
+- 基于操作系统已经实现的 TCP 服务，写一个 stream socket, 读取一个网页上的信息
+- 实现一个 in-memory reliable byte stream
+    - in-memory: 单机的，暂时不考虑节点之间的数据传输
+    - 是 TCP 服务的一个简单版本抽象: 向管道的一端写入数据；可以从另一端读取数据
+    - flow-controlled: 有容量限制
+### in-memory reliable byte stream
+- 在 TCP 中的应用:
+    - 对于发送端，应用层是向 byte stream 中写数据；传输层是从中读数据；接收方就反过来
+    - 数据在网络中的传输也可以抽象成 byte stream, 只不过是不可靠的，需要通过 TCP 的机制来弥补这一问题
+## 代码细节
+### 基于已实现的 TCP 服务，写一个 stream socket
+- 很简单，发送端把套接字绑定到 host 的地址上；写数据，然后读数据即可
+- bind():  associates the socket with its local address, 所以服务器会调用 bind()
+- connect(): connect to a remote [server] address, 所以客户端调用 connect()
+### in-memory reliable byte stream
+- 使用 string 作为 byte stream
+    - append(): 对应 push
+    - substr, erase: 对应 peek 和 pop()
+
+# lab1
+## 整体工作
+- lab1 - lab4 合起来实现一个 TCP 服务
+- TCP: providing a pair of reliable byte streams using unreliable datagrams
+- lab1 主要实现的是一个 stream reassembler
+    - 真实世界中，丢包、延迟等现象都会发生，这导致 segments 很可能无法按序达到；这个 lab 会根据数据的顺序把数据重组起来
+    - 显然是 TCP 中一个很重要的功能，能够帮助接收方给出正确的 ack
+- reassember 有一个容量限制，不能无限制地存储没有被重组的数据（TCP 中，接收方不能无限制地存储没有被 ack 的包）
+## 设计思路
+- 接收 string 时, 先统一把 string 写入 set 中，set 是根据 string 的 start_index 来排序的 `push_string_to_set`
+    - 如果容量已满，需要调用 `remove_from_set`
+    - 注意写入的字符串不应该存在 overlap, `get_non_overlap_range`
+- 然后我们再去检查 set 中是否存在能够被重组的 string (用到了 set 是有序的性质)，如有则进行重组
+    - 遍历 set, 直到没有字符串可以被重组
+- 分成两步走，感觉是比较清晰的
+## 代码细节
+### 接收 string, 先存到一个数据结构中
+- 用的是 set, 原因
+    - 能够遍历（便于寻找能够被重组的 string）
+    - 能够排序（优先查找序号较小的 string）
+### `push_string_to_set`
+- 首先是和之前已经存储的字符串不应该有 overlap(起始和终止序号的角度)
+    - 加入 set 前就这么做，能够节省空间
+- 容量不足，则 `remove_from_set`
+- 字符串对应部分（去掉了 overlap）, 写入 set
+### `get_non_overlap_range`
+- 一方面和其他未被重组的字符串比较
+- 另一方面也和已经被重组的序号比较，小于这个序号的，直接丢弃
+### `remove_from_set`
+- 一个关键点，如果空间不够，应该优先删除 set 中的哪部分？
+    - 我认为是 start_index 越大的，越应该删除（注意这里已经没有 overlap 了），因为这种字符串被重组的概率比较低
+    - 所以就应该从后往前遍历 set, 去删除字符串（直到 set 中字符串的 start_index 比要插入的更小）
+### `assemble_string_from_set`
+- 到了重组数据阶段，遍历前面的 set, 看看哪些字符串可以被重组
+- set 已经排序了，因此如果发现当前字符串的序号过大，就不需要往下遍历了
+- 比较麻烦的地方: 重组后的数据时写入 buffer 中，buffer 也有容量限制，股可能出现一个 string 只有部分能够被重组的情况，这时候把 string 的剩下部分，再写入 set
+
+# lab2 TCP Receiver
+- TCP 采用的是 Sliding Window 策略；允许缓存一些没有被 ack 的 segments (由于丢包或者延迟导致的); 目标是减少重传次数（只重传丢的包）同时提高速度（可以连续发多个包，不需要等收到上一个包的 ack 了再发下一个包）
+## 整体工作
+- Sliding Window 的重要逻辑，其实 stream reassembler 已经实现了
+- receiver 主要完成和 Sender 之间的信息交互
+    - 接收数据
+    - 维护 ack
+    - 维护 window size (flow control)
+    - 实现数据 index 到 ack 的转换
+## 代码细节
+### 64-bit data indexes --> 32-bit seqnos
+- 目的就是节省空间, TCP segment 的空间很宝贵
+- seqno, absolute seqno, (data) index; TCP 传输的是 absolute seqno
+    - absolute seqno 也会溢出啊？但是连接中出现差了一轮的（2^32）的 seqno 是非常罕见的，可以忽略溢出的影响
+- Why absolute seqno? 允许TCP 连接任意选择一个初始的 seqno, 避免被伪造一个 tcp segment
+### TCP Receiver
+#### 整体状态
+- 如果连接已经关闭，或者连接还没建立，则拒收报文
+    - 连接已经关闭（注意条件并不是收到 FIN 报文）: _reassembler.stream_out().input_ended()
+    - 连接还没建立: 还没有收到过 SYN, 并且当前报文带有 SYN 标记
+- 接收报文并检查
+    - 首次收到 SYN 报文: 建立连接（用一个布尔值记录状态）；记录 ISN
+    - 首次收到 FIN 报文: 记录状态（布尔值）；eof = true (写入 reassembler 的时候，会修改 _eof_index, 告知底层的 byte stream 何时关闭管道)
+- 接下来就是将报文中的数据写入 reassembler, 注意带上 eof 标记
+#### seqno 偏移
+- 这里的偏移，其主要原因是: SYN flag 和 FIN flag 各自占据了一个 sequence number; 导致 seqno 的数量和数据长度之间存在偏移
+- 理解: 第一个 sequence number 被 SYN 占据；最后一个 sequence number 被 FIN 占据
+- 那么对于 ISN, 应当是起始数据的位置（而不是 SYN 的位置），因此是 seqno+1
+- 同样的，对于带有 SYN 符号的报文，数据的起始位置是 seqno + 1
+- ackno 就根据 seqno 相应地生成，唯一的特例:
+    - 当 input_ended(), 也就是所有数据都重组好了，ackno 应该是数据的终止位置 + 1 (因为发送端 FIN 符号占据了一个 sequence number)
+
+#### Window size
+- reassembler 可以存储的数据；那就是整体的容量 - buffer 中已经使用的容量（还没有被读取的数据）
+
 # lab3
 - 实现 TCP 的发送端
 ## 整体工作
