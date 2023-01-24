@@ -195,6 +195,24 @@ ByteStream &stream_in() { return _stream; }
     - 相应操作: RTO 设为初值、从队列（集合）中移除、consecutive_retransmission 设为 0
     - 如果所有 segments 都被 ack, 则清除 timer; 否则重新启动一个 timer
 
+# lab4
+- 实现 TCP Connection
+## 动机和内容
+- 还是首先得回顾一下 sender 和 receiver
+- sender:
+    - 通过一个 ByteStream 和应用层连接: 应用层向 ByteStream 写入数据，Sender 从 ByteStream 中读取数据，并且发送给另一方
+- receiver:
+    - 也是通过一个 ByteStream 和应用层连接；但是这个 ByteStream 实现了流重组的功能; 应用层从 ByteStream 中读取重组好的数据
+### 什么是 Connection
+- Connection 考虑的是两个 TCP peer 之间的连接，及其相关状态的维护
+- 每个 peer 都既有sender, 又有 receiver
+    - 因为 TCP 是一个双向连接（全双工？），两个 peer 都可以发送和接收数据
+- connection 有哪些状态需要维护？
+    - 连接的建立和关闭（整体状态）
+    - 一些高层的拥塞控制（?）机制，比如太久没有收到回复，应该终止连接
+    - sender 和 receiver 同时完成的任务: 对于 peer, 收到一个 segment 之后，receiver 和 sender 都有相应的动作；相应地，发送 segment 时，sender 和 receiver 的信息（比如 receiver 的 ackno）都要带上
+    -
+
 # 一些非代码问题的处理
 ## 磁盘空间不够:
 - 删除 /var/log 底下的文件，相对比较安全
