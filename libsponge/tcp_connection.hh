@@ -21,6 +21,18 @@ class TCPConnection {
     //! in case the remote TCPConnection doesn't know we've received its whole stream?
     bool _linger_after_streams_finish{true};
 
+    //! 计时器的开始时间
+    size_t _timer_start{SIZE_MAX};
+
+    //! 连接的存活时间(millisecond)
+    size_t _connection_alive_ms{0};
+
+    //! 收到上一个 segment 的时间点（相对时间）
+    size_t _timepoint_last_segment_received{0};
+
+    //! 连接是否 alive
+    bool _connection_alive{false};
+
   public:
     //! \name "Input" interface for the writer
     //!@{
