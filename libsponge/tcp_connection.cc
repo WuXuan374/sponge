@@ -41,10 +41,8 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
     if (seg.header().rst) {
         _sender.stream_in().set_error();
         _receiver.stream_out().set_error();
-        // TODO: kill the connection, 可能需要整理成一个函数
-        _connection_alive = false;
-        // 接下来发送的 segment 要带上 _rst_flag
-        _need_sent_rst = true;
+        // TODO: kill the connection, 可能需要整理成一个函数, 包括发送 FIN 等
+        // _connection_alive = false;
     }
     _receiver.segment_received(seg);
     if (seg.header().ack) {
@@ -55,8 +53,9 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
     }
     uint64_t prev_bytes_in_flight = _sender.bytes_in_flight();
     _sender.fill_window();
-    // 对于非空的 incoming segment (占据至少一个 sequence number), 至少要回复一个 segment
+    
     if (_sender.bytes_in_flight() == prev_bytes_in_flight) {
+        // 对于非空的 incoming segment (占据至少一个 sequence number), 至少要回复一个 segment
         // TODO: invalid sequence number 怎么弄
         // 发送端会发送比 ack 小的 seqno
         if (
@@ -65,6 +64,8 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
         )
         _sender.send_empty_segment();
     }
+    // 真正把数据传递出去
+    push_segments_out();
 }
 
 bool TCPConnection::active() const { 
@@ -78,7 +79,6 @@ size_t TCPConnection::write(const string &data) {
     }
     size_t len = _sender.stream_in().write(data);
     _sender.fill_window();
-    // TODO: ACK flag 的设置如何实现？并且需要把 segment 写入 _segments_out ?
     push_segments_out();
     return len;
 }
@@ -98,9 +98,10 @@ void TCPConnection::tick(const size_t ms_since_last_tick) {
         // abort the connection, send a reset segment to the peer
         // TODO: close connection
         // TODO: empty segment 怎么带上 RST flag?
-        _sender.send_empty_segment();
+        // _sender.send_empty_segment();
         _need_sent_rst = true;
     }
+    push_segments_out();
 }
 
 void TCPConnection::end_input_stream() {
@@ -112,7 +113,10 @@ void TCPConnection::end_input_stream() {
 }
 
 void TCPConnection::connect() {
+    // 需要发送一个 SYN segment
     _connection_alive = true;
+    _sender.send_empty_segment();
+    push_segments_out();
 }
 
 TCPConnection::~TCPConnection() {
@@ -129,7 +133,7 @@ TCPConnection::~TCPConnection() {
 
 bool TCPConnection::invalid_sequence_number(WrappingInt32 seqno) {
     if (_receiver.ackno().has_value()) {
-        return _receiver.ackno().value() - seqno > 0;
+        return (_receiver.ackno().value() - seqno) > 0;
     }
     return false;
 }
@@ -139,17 +143,21 @@ void TCPConnection::push_segments_out() {
     size_t available_window_size = _receiver.window_size();
     while (!_sender.segments_out().empty() && available_window_size > 0) {
         TCPSegment tcp_seg = _sender.segments_out().front();
-        // 维护 ACK flag
+        // 维护 ACK flag, receiver 这边的 ackno 和 window_size
         if (_receiver.ackno().has_value()) {
             tcp_seg.header().ack = true;
-        } 
-        if (_need_sent_rst) {
-            tcp_seg.header().rst = true;
+            tcp_seg.header().ackno = _receiver.ackno().value();
         }
+        tcp_seg.header().win = _receiver.window_size();
+        // TODO: 那么，什么时候不再发送 RST 呢?
+        // if (_need_sent_rst) {
+        //     tcp_seg.header().rst = true;
+        // }
         if (tcp_seg.length_in_sequence_space() > available_window_size) {
             // 超过 window size, 这个 segment 发送失败
             break;
         } else {
+            // TCPConnection 的 segments_out
             _segments_out.push(tcp_seg);
             // 维护相应状态
             _sender.segments_out().pop();
