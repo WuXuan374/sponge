@@ -41,8 +41,8 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
     if (seg.header().rst) {
         _sender.stream_in().set_error();
         _receiver.stream_out().set_error();
-        // TODO: kill the connection, 可能需要整理成一个函数, 包括发送 FIN 等
-        // _connection_alive = false;
+        // 根据文档，收到 RST flag 的情况下，直接将其置为 false
+        _connection_alive = false;
     }
     _receiver.segment_received(seg);
     if (seg.header().ack) {
@@ -94,7 +94,7 @@ void TCPConnection::tick(const size_t ms_since_last_tick) {
         _connection_alive_ms += ms_since_last_tick;
     }
     _sender.tick(ms_since_last_tick);
-    if (_sender.consecutive_retransmissions() > TCPConfig::MAX_RETX_ATTEMPTS) {
+    if (_sender.consecutive_retransmissions() > _cfg.MAX_RETX_ATTEMPTS) {
         // abort the connection, send a reset segment to the peer
         // TODO: close connection
         // TODO: empty segment 怎么带上 RST flag?
@@ -163,5 +163,36 @@ void TCPConnection::push_segments_out() {
             _sender.segments_out().pop();
             available_window_size -= tcp_seg.length_in_sequence_space();
         }
+    }
+    check_connection_state();
+}
+
+//! TODO: 什么时候进行这个状态的检查？
+//! push_segment_out 中进行检查；tick() 也会调用 push_segment_out
+void TCPConnection::check_connection_state() {
+    if (!_connection_alive) {
+        return;
+    }
+    if (_receiver.stream_out().input_ended() && (!_sender.stream_in().input_ended())) {
+        _linger_after_streams_finish = false;
+    }
+    if (!_linger_after_streams_finish) {
+        // inbound stream has been fully assembled and has ended
+        if (_receiver.unassembled_bytes() == 0 && _receiver.stream_out().input_ended()) {
+            // outbound stream has been fully acknowledged
+            if (_sender.bytes_in_flight() == 0) {
+                _connection_alive = false;
+            }
+        }
+    } else {
+        if (time_since_last_segment_received() >= 10 * _cfg.rt_timeout) {
+            _connection_alive = false;
+        }
+    }
+    if (!_connection_alive) {
+        // 本次调用发生了状态的变化
+        // 发送 FIN 报文
+        _sender.send_empty_segment();
+        push_segments_out();
     }
 }
