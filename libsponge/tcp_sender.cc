@@ -122,16 +122,17 @@ unsigned int TCPSender::consecutive_retransmissions() const { return _consecutiv
 
 //! 数据长度非空时，注意维护 _receiver_window_size
 //! TODO: 需要传一个 invalid sequence number, 那么就传一个比 ack 更小的吧
-void TCPSender::send_empty_segment() {
+void TCPSender::send_empty_segment(bool syn) {
     if (!check_seqno(_next_seqno)) {
         return;
     }
 
     // TCPSegment tcp_seg = construct_segment(_next_seqno, 0);
-    // 约定这个特别的 segment, 其 seqno 为 receiver_ackno-1; 兜底的 absolute value 为 0
+    // 约定这个特别的 segment, 其 seqno 为 receiver_ackno-1; 兜底的 absolute value 为 0(对应还没有建立连接，发送 SYN)
     TCPSegment tcp_seg = construct_segment(
         _receiver_ackno != SIZE_MAX ? (_receiver_ackno - 1) : 0,
-        0
+        0,
+        syn
     );
     size_t seg_len = tcp_seg.length_in_sequence_space();
     
@@ -198,10 +199,10 @@ void TCPSender::resend_segment(TCPSegment seg) {
     _timer_start = _ms_alive;
 }
 
-TCPSegment TCPSender::construct_segment(uint64_t seqno, uint64_t payload_len) {
+TCPSegment TCPSender::construct_segment(uint64_t seqno, uint64_t payload_len, bool syn) {
     TCPSegment tcp_seg;
     tcp_seg.header().seqno = wrap(seqno, _isn);
-    if (seqno == 0) {
+    if (syn && seqno == 0) {
         tcp_seg.header().syn = true;
     }
     

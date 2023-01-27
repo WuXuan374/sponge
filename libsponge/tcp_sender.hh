@@ -84,7 +84,7 @@ class TCPSender {
 
     //! 由于 window 的限制，segment 的不同部分是存在优先级的
     //! 体现为 SYN flag > payload > FIN flag
-    TCPSegment construct_segment(uint64_t seqno, uint64_t payload_len);
+    TCPSegment construct_segment(uint64_t seqno, uint64_t payload_len, bool syn=true);
 
     //! 检查 seqno 是否合法，若不合法，则不应该发送这个 segment
     bool check_seqno(uint64_t seqno);
@@ -111,7 +111,8 @@ class TCPSender {
     void ack_received(const WrappingInt32 ackno, const uint16_t window_size);
 
     //! \brief Generate an empty-payload segment (useful for creating empty ACK segments)
-    void send_empty_segment();
+    //! 新增了 syn 参数，控制 segment 中的 syn 字段
+    void send_empty_segment(bool syn=false);
 
     //! \brief create and send segments to fill as much of the window as possible
     void fill_window();

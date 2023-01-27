@@ -31,7 +31,7 @@ class TCPConnection {
     bool _need_sent_rst{false};
 
     //! 连接是否存活，初值为 false; 建立和关闭连接时需要维护
-    bool _connection_alive{false};
+    bool _active{false};
 
     //! 检查发送方的 seqno 是否不合法
     //! 不合法: 约定为比 ackno 更小的

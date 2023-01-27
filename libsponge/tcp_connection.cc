@@ -30,14 +30,11 @@ size_t TCPConnection::time_since_last_segment_received() const {
 }
 
 void TCPConnection::segment_received(const TCPSegment &seg) { 
-    if (!active()) {
-        return;
+    // 收到了 SYN, 并且 receiver 位于 LISTEN 状态; 则发送一个 SYN
+    if (seg.header().syn && !(_receiver.ackno().has_value())) {
+        _sender.send_empty_segment(true);
+        push_segments_out();
     }
-
-    // if (seg.header().syn && _receiver.ackno().has_value()) {
-    //     return;
-    // }
-
     if (_connection_alive_ms != SIZE_MAX) {
         _timepoint_last_segment_received = _connection_alive_ms;
     }
@@ -46,6 +43,7 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
         _sender.stream_in().set_error();
         _receiver.stream_out().set_error();
         // TODO: 如何终止连接?
+        _active = false;
         return;
     }
 
@@ -81,11 +79,7 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
 //! 并不是直接维护一个状态变量
 //! 根据注释里头的要求来写
 bool TCPConnection::active() const { 
-    return (
-        !(_receiver.stream_out().eof() || _receiver.stream_out().error()) 
-        || !(_sender.stream_in().eof() || _sender.stream_in().error()) 
-        || _linger_after_streams_finish
-    ); 
+    return _active;
 
 }
 
@@ -130,13 +124,12 @@ void TCPConnection::end_input_stream() {
 }
 
 void TCPConnection::connect() {
-    // 需要发送一个 SYN segment
-    _connection_alive = true;
+    // 检查是否位于 CLOSED 状态
     if (_sender.next_seqno_absolute() == 0) {
-        // _sender.send_empty_segment();
+        // 带上了 SYN 标记
+        _sender.send_empty_segment(true);
         push_segments_out();
     }
-    
 }
 
 TCPConnection::~TCPConnection() {
@@ -161,8 +154,7 @@ bool TCPConnection::invalid_sequence_number(WrappingInt32 seqno) {
 
 void TCPConnection::push_segments_out() {
     // TODO: 维护 _need_sent_rst
-    size_t available_window_size = _receiver.window_size();
-    while (!_sender.segments_out().empty() && available_window_size > 0) {
+    while (!_sender.segments_out().empty()) {
         TCPSegment tcp_seg = _sender.segments_out().front();
         // 维护 ACK flag, receiver 这边的 ackno 和 window_size
         if (_receiver.ackno().has_value()) {
@@ -174,16 +166,10 @@ void TCPConnection::push_segments_out() {
         // if (_need_sent_rst) {
         //     tcp_seg.header().rst = true;
         // }
-        if (tcp_seg.length_in_sequence_space() > available_window_size) {
-            // 超过 window size, 这个 segment 发送失败
-            break;
-        } else {
-            // TCPConnection 的 segments_out
-            _segments_out.push(tcp_seg);
-            // 维护相应状态
-            _sender.segments_out().pop();
-            available_window_size -= tcp_seg.length_in_sequence_space();
-        }
+        // TCPConnection 的 segments_out
+        _segments_out.push(tcp_seg);
+        // 维护相应状态
+        _sender.segments_out().pop();
     }
     check_connection_state();
 }
@@ -191,9 +177,17 @@ void TCPConnection::push_segments_out() {
 //! TODO: 什么时候进行这个状态的检查？
 //! push_segment_out 中进行检查；tick() 也会调用 push_segment_out
 void TCPConnection::check_connection_state() {
-    if (!_connection_alive) {
-        return;
+    bool prev_active_state = active();
+    if (!prev_active_state) {
+        // receiver 位于 `SYN_RECV`
+        if (_receiver.ackno().has_value() && !(_receiver.stream_out().input_ended())) {
+            // sender 位于 `SYN_ACKED`
+            if (!(_sender.stream_in().eof()) && _sender.next_seqno_absolute() > _sender.bytes_in_flight()) {
+                _active = true;
+            }
+        }
     }
+    
     if (_receiver.stream_out().eof() && (!_sender.stream_in().eof())) {
         _linger_after_streams_finish = false;
     }
@@ -202,16 +196,16 @@ void TCPConnection::check_connection_state() {
         if (_receiver.unassembled_bytes() == 0 && _receiver.stream_out().input_ended()) {
             // outbound stream has been fully acknowledged
             if (_sender.bytes_in_flight() == 0) {
-                _connection_alive = false;
+                _active = false;
             }
         }
     } else {
         if (time_since_last_segment_received() >= 10 * _cfg.rt_timeout) {
-            _connection_alive = false;
+            _active = false;
         }
     }
-    if (!_connection_alive) {
-        // 本次调用发生了状态的变化
+    if (prev_active_state && (!_active)) {
+        // 连接关闭
         // 发送 FIN 报文
         _sender.send_empty_segment();
         push_segments_out();
