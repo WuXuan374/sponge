@@ -127,11 +127,12 @@ void TCPSender::send_empty_segment() {
         return;
     }
 
-    TCPSegment tcp_seg = construct_segment(_next_seqno, 0);
-    // TCPSegment tcp_seg = construct_segment(
-    //     _receiver_ackno - 1,
-    //     0
-    // );
+    // TCPSegment tcp_seg = construct_segment(_next_seqno, 0);
+    // 约定这个特别的 segment, 其 seqno 为 receiver_ackno-1; 兜底的 absolute value 为 0
+    TCPSegment tcp_seg = construct_segment(
+        _receiver_ackno != SIZE_MAX ? (_receiver_ackno - 1) : 0,
+        0
+    );
     size_t seg_len = tcp_seg.length_in_sequence_space();
     
     // window 足够 && 不在 _outstanding 队列中

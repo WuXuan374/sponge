@@ -30,10 +30,14 @@ size_t TCPConnection::time_since_last_segment_received() const {
 }
 
 void TCPConnection::segment_received(const TCPSegment &seg) { 
-    // 首先检查是否存在连接
     if (!active()) {
         return;
     }
+
+    // if (seg.header().syn && _receiver.ackno().has_value()) {
+    //     return;
+    // }
+
     if (_connection_alive_ms != SIZE_MAX) {
         _timepoint_last_segment_received = _connection_alive_ms;
     }
@@ -41,9 +45,10 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
     if (seg.header().rst) {
         _sender.stream_in().set_error();
         _receiver.stream_out().set_error();
-        // 根据文档，收到 RST flag 的情况下，直接将其置为 false
-        _connection_alive = false;
+        // TODO: 如何终止连接?
+        return;
     }
+
     _receiver.segment_received(seg);
     if (seg.header().ack) {
         _sender.ack_received(
@@ -51,25 +56,37 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
             seg.header().win
         );
     }
-    uint64_t prev_bytes_in_flight = _sender.bytes_in_flight();
+
+    size_t prev_size = _sender.segments_out().size();
     _sender.fill_window();
     
-    if (_sender.bytes_in_flight() == prev_bytes_in_flight) {
+    // _segments_out 才能反映是否发送了 segment (即使是空的 segment)
+    if (_sender.segments_out().size() == prev_size) {
         // 对于非空的 incoming segment (占据至少一个 sequence number), 至少要回复一个 segment
         // TODO: invalid sequence number 怎么弄
         // 发送端会发送比 ack 小的 seqno
-        if (
-            seg.length_in_sequence_space() > 0 ||
-            invalid_sequence_number(seg.header().seqno)
-        )
-        _sender.send_empty_segment();
+        // if (
+        //     seg.length_in_sequence_space() > 0 ||
+        //     invalid_sequence_number(seg.header().seqno)
+        // )
+        if (seg.length_in_sequence_space() > 0) {
+            _sender.send_empty_segment();
+        }
+        
     }
     // 真正把数据传递出去
     push_segments_out();
 }
 
+//! 并不是直接维护一个状态变量
+//! 根据注释里头的要求来写
 bool TCPConnection::active() const { 
-    return _connection_alive;
+    return (
+        !(_receiver.stream_out().eof() || _receiver.stream_out().error()) 
+        || !(_sender.stream_in().eof() || _sender.stream_in().error()) 
+        || _linger_after_streams_finish
+    ); 
+
 }
 
 //! 这个函数应该是向 sender 的 ByteStream 写入，然后 sender 自己从中读取数据，并发送 TCPSegment
@@ -115,8 +132,11 @@ void TCPConnection::end_input_stream() {
 void TCPConnection::connect() {
     // 需要发送一个 SYN segment
     _connection_alive = true;
-    _sender.send_empty_segment();
-    push_segments_out();
+    if (_sender.next_seqno_absolute() == 0) {
+        // _sender.send_empty_segment();
+        push_segments_out();
+    }
+    
 }
 
 TCPConnection::~TCPConnection() {
@@ -132,9 +152,10 @@ TCPConnection::~TCPConnection() {
 }
 
 bool TCPConnection::invalid_sequence_number(WrappingInt32 seqno) {
+    // 对应 tcp_sender.cc L132
     if (_receiver.ackno().has_value()) {
-        return (_receiver.ackno().value() - seqno) > 0;
-    }
+        return (_receiver.ackno().value() - seqno) == 1;
+    } 
     return false;
 }
 
@@ -173,7 +194,7 @@ void TCPConnection::check_connection_state() {
     if (!_connection_alive) {
         return;
     }
-    if (_receiver.stream_out().input_ended() && (!_sender.stream_in().input_ended())) {
+    if (_receiver.stream_out().eof() && (!_sender.stream_in().eof())) {
         _linger_after_streams_finish = false;
     }
     if (!_linger_after_streams_finish) {
@@ -195,4 +216,8 @@ void TCPConnection::check_connection_state() {
         _sender.send_empty_segment();
         push_segments_out();
     }
+}
+
+bool TCPConnection::receiver_in_syn_recv() {
+    return _receiver.ackno().has_value() && (!_receiver.stream_out().input_ended());
 }

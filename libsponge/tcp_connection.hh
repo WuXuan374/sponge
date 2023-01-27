@@ -44,6 +44,9 @@ class TCPConnection {
     //! 维护连接状态相关的变量
     void check_connection_state();
 
+    //! receiver 是否处于 SYN_RECV 状态；不处于这个状态，是不能回复 SYN 之外的报文的
+    bool receiver_in_syn_recv();
+
   public:
     //! \name "Input" interface for the writer
     //!@{
