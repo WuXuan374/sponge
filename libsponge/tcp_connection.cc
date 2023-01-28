@@ -35,15 +35,16 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
         _sender.send_empty_segment(true);
         push_segments_out();
     }
+    if (!active()) {
+        return;
+    }
+
     if (_connection_alive_ms != SIZE_MAX) {
         _timepoint_last_segment_received = _connection_alive_ms;
     }
     
     if (seg.header().rst) {
-        _sender.stream_in().set_error();
-        _receiver.stream_out().set_error();
-        // TODO: 如何终止连接?
-        _active = false;
+        unclean_shutdown();
         return;
     }
 
@@ -76,11 +77,9 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
     push_segments_out();
 }
 
-//! 并不是直接维护一个状态变量
 //! 根据注释里头的要求来写
 bool TCPConnection::active() const { 
     return _active;
-
 }
 
 //! 这个函数应该是向 sender 的 ByteStream 写入，然后 sender 自己从中读取数据，并发送 TCPSegment
@@ -106,13 +105,11 @@ void TCPConnection::tick(const size_t ms_since_last_tick) {
     }
     _sender.tick(ms_since_last_tick);
     if (_sender.consecutive_retransmissions() > _cfg.MAX_RETX_ATTEMPTS) {
-        // abort the connection, send a reset segment to the peer
-        // TODO: close connection
-        // TODO: empty segment 怎么带上 RST flag?
-        // _sender.send_empty_segment();
-        _need_sent_rst = true;
+        unclean_shutdown();
+    } else {
+        push_segments_out();
     }
-    push_segments_out();
+    
 }
 
 void TCPConnection::end_input_stream() {
@@ -121,6 +118,9 @@ void TCPConnection::end_input_stream() {
         return;
     }
     _sender.stream_in().end_input();
+    // 此时可能会发送 FIN
+    _sender.fill_window();
+    push_segments_out(); 
 }
 
 void TCPConnection::connect() {
@@ -162,10 +162,9 @@ void TCPConnection::push_segments_out() {
             tcp_seg.header().ackno = _receiver.ackno().value();
         }
         tcp_seg.header().win = _receiver.window_size();
-        // TODO: 那么，什么时候不再发送 RST 呢?
-        // if (_need_sent_rst) {
-        //     tcp_seg.header().rst = true;
-        // }
+        if (_need_sent_rst) {
+            tcp_seg.header().rst = true;
+        }
         // TCPConnection 的 segments_out
         _segments_out.push(tcp_seg);
         // 维护相应状态
@@ -174,44 +173,38 @@ void TCPConnection::push_segments_out() {
     check_connection_state();
 }
 
-//! TODO: 什么时候进行这个状态的检查？
 //! push_segment_out 中进行检查；tick() 也会调用 push_segment_out
 void TCPConnection::check_connection_state() {
     bool prev_active_state = active();
     if (!prev_active_state) {
-        // receiver 位于 `SYN_RECV`
-        if (_receiver.ackno().has_value() && !(_receiver.stream_out().input_ended())) {
-            // sender 位于 `SYN_ACKED`
-            if (!(_sender.stream_in().eof()) && _sender.next_seqno_absolute() > _sender.bytes_in_flight()) {
-                _active = true;
-            }
+        // 重新建立连接: Receiver 位于 `SYN_RECV`, Sender 位于 `SYN_SENT`, 视作重新建立了连接
+        if (_receiver.ackno().has_value() && !(_receiver.stream_out().input_ended()) && _sender.next_seqno_absolute() > 0) {
+            _active = true;
         }
+        return; 
     }
     
-    if (_receiver.stream_out().eof() && (!_sender.stream_in().eof())) {
+    // inbound stream ended, outbound stream not EOF (此时我已经收到了对面的 FIN, 不需要等待，可以直接关闭)
+    if (_receiver.stream_out().input_ended() && (!_sender.stream_in().eof())) {
         _linger_after_streams_finish = false;
     }
-    if (!_linger_after_streams_finish) {
-        // inbound stream has been fully assembled and has ended
-        if (_receiver.unassembled_bytes() == 0 && _receiver.stream_out().input_ended()) {
-            // outbound stream has been fully acknowledged
-            if (_sender.bytes_in_flight() == 0) {
-                _active = false;
-            }
+    // inbound stream ended and fully assembled & outbound stream ended and fully sent
+    if (_receiver.stream_out().eof() && _sender.stream_in().eof() && _sender.next_seqno_absolute() == _sender.stream_in().bytes_written() + 2) {
+        if (!_linger_after_streams_finish || time_since_last_segment_received() >= 10 * _cfg.rt_timeout) {
+            clean_shutdown();
         }
-    } else {
-        if (time_since_last_segment_received() >= 10 * _cfg.rt_timeout) {
-            _active = false;
-        }
-    }
-    if (prev_active_state && (!_active)) {
-        // 连接关闭
-        // 发送 FIN 报文
-        _sender.send_empty_segment();
-        push_segments_out();
     }
 }
 
-bool TCPConnection::receiver_in_syn_recv() {
-    return _receiver.ackno().has_value() && (!_receiver.stream_out().input_ended());
+void TCPConnection::unclean_shutdown() {
+    _need_sent_rst = true;
+    _sender.send_empty_segment();
+    _sender.stream_in().set_error();
+    _receiver.stream_out().set_error();
+    _active = false;
+    push_segments_out();
+}
+
+void TCPConnection::clean_shutdown() {
+    _active = false;
 }

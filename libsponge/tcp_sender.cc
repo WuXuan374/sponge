@@ -89,7 +89,7 @@ void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_si
     }
 
     // 检查是否发送了 FIN, 并收到对应的 ack
-    if (_stream.input_ended() && _stream.buffer_empty()) {
+    if (_stream.eof()) {
         if (_next_seqno == _stream.bytes_written() + 2 && _next_seqno == _receiver_ackno) {
             _fin_acked = true;
         }
@@ -212,7 +212,7 @@ TCPSegment TCPSender::construct_segment(uint64_t seqno, uint64_t payload_len, bo
     }
 
     // FIN 的优先级最低，在 window 还有剩余的情况下才添加该标记
-    if (_stream.input_ended() && _stream.buffer_empty() && tcp_seg.length_in_sequence_space() < sender_window_size()) {
+    if (_stream.eof() && tcp_seg.length_in_sequence_space() < sender_window_size()) {
         tcp_seg.header().fin = true;
     }
     return tcp_seg;

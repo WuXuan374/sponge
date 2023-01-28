@@ -30,8 +30,8 @@ class TCPConnection {
     //! 发送的 segment 是否需要带上 RST flag
     bool _need_sent_rst{false};
 
-    //! 连接是否存活，初值为 false; 建立和关闭连接时需要维护
-    bool _active{false};
+    //! 连接是否存活，初值为 true; 建立和关闭连接时需要维护
+    bool _active{true};
 
     //! 检查发送方的 seqno 是否不合法
     //! 不合法: 约定为比 ackno 更小的
@@ -44,8 +44,11 @@ class TCPConnection {
     //! 维护连接状态相关的变量
     void check_connection_state();
 
-    //! receiver 是否处于 SYN_RECV 状态；不处于这个状态，是不能回复 SYN 之外的报文的
-    bool receiver_in_syn_recv();
+    //! 收到 RST flag, 并关闭连接
+    void unclean_shutdown();
+
+    //! 正常关闭连接
+    void clean_shutdown();
 
   public:
     //! \name "Input" interface for the writer
