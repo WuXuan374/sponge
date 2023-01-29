@@ -153,7 +153,6 @@ bool TCPConnection::invalid_sequence_number(WrappingInt32 seqno) {
 }
 
 void TCPConnection::push_segments_out() {
-    // TODO: 维护 _need_sent_rst
     while (!_sender.segments_out().empty()) {
         TCPSegment tcp_seg = _sender.segments_out().front();
         // 维护 ACK flag, receiver 这边的 ackno 和 window_size
@@ -189,8 +188,8 @@ void TCPConnection::check_connection_state() {
         _linger_after_streams_finish = false;
     }
     // inbound stream ended and fully assembled & outbound stream ended and fully sent
-    if (_receiver.stream_out().eof() && _sender.stream_in().eof() && _sender.next_seqno_absolute() == _sender.stream_in().bytes_written() + 2) {
-        if (!_linger_after_streams_finish || time_since_last_segment_received() >= 10 * _cfg.rt_timeout) {
+    if (_receiver.stream_out().input_ended() && _sender.stream_in().eof() && _sender.next_seqno_absolute() == _sender.stream_in().bytes_written() + 2) {
+        if ((!_linger_after_streams_finish) || time_since_last_segment_received() >= 10 * _cfg.rt_timeout) {
             clean_shutdown();
         }
     }
