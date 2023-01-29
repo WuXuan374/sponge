@@ -35,6 +35,7 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
         unclean_shutdown();
         return;
     }
+
     if (seg.header().ack) {
         _sender.ack_received(
             seg.header().ackno,
@@ -42,29 +43,32 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
         );
     }
     _receiver.segment_received(seg);
-    
-    // 收到了 SYN, 并且 receiver 位于 LISTEN 状态; 则发送一个 SYN
-    if (seg.header().syn && !(_receiver.ackno().has_value())) {
-        _sender.send_empty_segment(true);
-    }
 
     if (_connection_alive_ms != SIZE_MAX) {
         _timepoint_last_segment_received = _connection_alive_ms;
     }
     
-    size_t prev_size = _sender.segments_out().size();
-    _sender.fill_window();
-    
-    // _segments_out 才能反映是否发送了 segment (即使是空的 segment)
-    if (_sender.segments_out().size() == prev_size) {
-        // 1. seg 占据了 sequence number; 2. "keep-alive" segment
-        if (seg.length_in_sequence_space() > 0 || (
-            _receiver.ackno().has_value() && (seg.header().seqno == _receiver.ackno().value()-1)
-        )) {
-            _sender.send_empty_segment();
-        }
-        
+    // 收到了 SYN, 并且 receiver 位于 LISTEN 状态; 则发送一个 SYN
+    if (seg.header().syn && !(_receiver.ackno().has_value())) {
+        _sender.send_empty_segment(true);
     }
+    
+    
+    if (_receiver._syn_received) {
+        size_t prev_size = _sender.segments_out().size();
+        _sender.fill_window();
+        
+        // _segments_out 才能反映是否发送了 segment (即使是空的 segment)
+        if (_sender.segments_out().size() == prev_size) {
+            // 1. seg 占据了 sequence number; 2. "keep-alive" segment
+            if (seg.length_in_sequence_space() > 0 || (
+                _receiver.ackno().has_value() && (seg.header().seqno == _receiver.ackno().value()-1)
+            )) {
+                _sender.send_empty_segment();
+            }
+        }
+    }
+    
     // 真正把数据传递出去
     push_segments_out();
 }
@@ -88,7 +92,10 @@ size_t TCPConnection::write(const string &data) {
 //! \param[in] ms_since_last_tick number of milliseconds since the last call to this method
 void TCPConnection::tick(const size_t ms_since_last_tick) { 
     if (!active()) {
-       return; 
+        check_connection_state();
+        if (!active()) {
+            return; 
+        }
     }
     if (_connection_alive_ms == SIZE_MAX) {
         _connection_alive_ms = 0;
