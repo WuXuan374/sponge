@@ -32,7 +32,8 @@ class TCPConnection {
 
     //! 从 sender 的队列中读取 segment, 并将其写入 connection 的 _segments_out
     //! 需要维护一些状态，比如 RST, ACK 等
-    void push_segments_out(bool rst_flag=false);
+    //! 返回值: 是否成功发送了至少一个 segment
+    bool push_segments_out(bool rst_flag=false);
 
     //! 维护连接状态相关的变量
     void check_connection_state();

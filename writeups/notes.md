@@ -49,6 +49,8 @@
 ### `push_string_to_set`
 - 首先是和之前已经存储的字符串不应该有 overlap(起始和终止序号的角度)
     - 加入 set 前就这么做，能够节省空间
+- 对于字符串下标的检查
+    - `start_idx - _assembled_end_index >= _capacity`, 这种情况，该字符串是不可能被重组的，不应该放到 set 中, 否则会占据空间
 - 容量不足，则 `remove_from_set`
 - 字符串对应部分（去掉了 overlap）, 写入 set
 ### `get_non_overlap_range`

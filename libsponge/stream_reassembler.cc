@@ -54,6 +54,11 @@ void StreamReassembler::push_string_to_set(const std::string &data, const size_t
         return;
     }
 
+    // 距离非常远的情况，不应该存储这个 segment, 会导致其他 segment 无法被写入，最终导致重组失败
+    if (start_idx - _assembled_end_index >= _capacity) {
+        return;
+    }
+
     // 如果剩下的容量不足以存放当前字符串，则调用 remove_from_set
     // remove_from_set 的逻辑是: 优先删除缓存的，start_index 最大的字符串（能够被重组的概率最低）
     if (end_idx - start_idx > (_capacity - bytes_count())) {

@@ -99,8 +99,12 @@ void TCPConnection::tick(const size_t ms_since_last_tick) {
     if (_sender.consecutive_retransmissions() > _cfg.MAX_RETX_ATTEMPTS) {
         // 除了关闭连接，还需要发送带有 RST 的 segment
         unclean_shutdown();
-        _sender.send_empty_segment();
-        push_segments_out(true);
+        bool send_succeed = push_segments_out(true);
+        // 队列中没有可发送的 segment, 需要另外发送一个 segment, 并带上 RST
+        if (!send_succeed) {
+            _sender.send_empty_segment();
+            push_segments_out(true);
+        }
     } else {
         push_segments_out();
     }
@@ -139,7 +143,8 @@ TCPConnection::~TCPConnection() {
     }
 }
 
-void TCPConnection::push_segments_out(bool rst_flag) {
+bool TCPConnection::push_segments_out(bool rst_flag) {
+    bool flag = false;
     while (!_sender.segments_out().empty()) {
         TCPSegment tcp_seg = _sender.segments_out().front();
         // 维护 ACK flag, receiver 这边的 ackno 和 window_size
@@ -155,8 +160,10 @@ void TCPConnection::push_segments_out(bool rst_flag) {
         _segments_out.push(tcp_seg);
         // 维护相应状态
         _sender.segments_out().pop();
+        flag = true;
     }
     check_connection_state();
+    return flag;
 }
 
 //! push_segment_out 中进行检查；tick() 也会调用 push_segment_out
