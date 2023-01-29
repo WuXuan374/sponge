@@ -27,6 +27,10 @@ void TCPReceiver::segment_received(const TCPSegment &seg) {
     if (!_syn_received) { 
         return; 
     }
+    // 不合法的 sequence number: 比 _isn 还小
+    if (!check_seqno(seg)) {
+        return;
+    }
 
     // Push any data, or end-of-stream marker, to the StreamReassembler.
     bool eof = false;
@@ -75,4 +79,16 @@ size_t TCPReceiver::window_size() const {
     // distance between "first unassembled index (对应 ackno)" 和 "first unaccepatable index"
     // 整体的容量是 _capacity, 减去 buffer 里头还没有被读的数据，剩下的就是 reassembler 里头可以存储的数据，即上文所提的 distance.
     return _capacity - _reassembler.stream_out().buffer_size();
+}
+
+bool TCPReceiver::check_seqno(TCPSegment seg) const {
+    WrappingInt32 seqno = seg.header().seqno;
+    if (_isn - seqno > 1) {
+        return false;
+    }
+    if (_isn - seqno == 1) {
+        // isn 是不考虑 syn flag 的
+        return seg.header().syn;
+    }
+    return true;
 }

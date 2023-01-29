@@ -27,15 +27,12 @@ class TCPConnection {
     //! 收到上一个 segment 的时间点（相对时间）
     size_t _timepoint_last_segment_received{SIZE_MAX};
 
-    //! 发送的 segment 是否需要带上 RST flag
-    bool _need_sent_rst{false};
-
     //! 连接是否存活，初值为 true; 建立和关闭连接时需要维护
     bool _active{true};
 
     //! 从 sender 的队列中读取 segment, 并将其写入 connection 的 _segments_out
     //! 需要维护一些状态，比如 RST, ACK 等
-    void push_segments_out();
+    void push_segments_out(bool rst_flag=false);
 
     //! 维护连接状态相关的变量
     void check_connection_state();

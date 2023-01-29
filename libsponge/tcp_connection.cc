@@ -31,22 +31,21 @@ size_t TCPConnection::time_since_last_segment_received() const {
 
 void TCPConnection::segment_received(const TCPSegment &seg) { 
     if (seg.header().rst) {
+        // 收到 RST, 直接关闭连接，不需要再发送RST
         unclean_shutdown();
         return;
     }
-
-    _receiver.segment_received(seg);
     if (seg.header().ack) {
         _sender.ack_received(
             seg.header().ackno,
             seg.header().win
         );
     }
-
+    _receiver.segment_received(seg);
+    
     // 收到了 SYN, 并且 receiver 位于 LISTEN 状态; 则发送一个 SYN
     if (seg.header().syn && !(_receiver.ackno().has_value())) {
         _sender.send_empty_segment(true);
-        push_segments_out();
     }
 
     if (_connection_alive_ms != SIZE_MAX) {
@@ -98,7 +97,10 @@ void TCPConnection::tick(const size_t ms_since_last_tick) {
     }
     _sender.tick(ms_since_last_tick);
     if (_sender.consecutive_retransmissions() > _cfg.MAX_RETX_ATTEMPTS) {
+        // 除了关闭连接，还需要发送带有 RST 的 segment
         unclean_shutdown();
+        _sender.send_empty_segment();
+        push_segments_out(true);
     } else {
         push_segments_out();
     }
@@ -137,7 +139,7 @@ TCPConnection::~TCPConnection() {
     }
 }
 
-void TCPConnection::push_segments_out() {
+void TCPConnection::push_segments_out(bool rst_flag) {
     while (!_sender.segments_out().empty()) {
         TCPSegment tcp_seg = _sender.segments_out().front();
         // 维护 ACK flag, receiver 这边的 ackno 和 window_size
@@ -146,7 +148,7 @@ void TCPConnection::push_segments_out() {
             tcp_seg.header().ackno = _receiver.ackno().value();
         }
         tcp_seg.header().win = _receiver.window_size();
-        if (_need_sent_rst) {
+        if (rst_flag) {
             tcp_seg.header().rst = true;
         }
         // TCPConnection 的 segments_out
@@ -159,21 +161,23 @@ void TCPConnection::push_segments_out() {
 
 //! push_segment_out 中进行检查；tick() 也会调用 push_segment_out
 void TCPConnection::check_connection_state() {
-    bool prev_active_state = active();
-    if (!prev_active_state) {
+    if (!active()) {
         // 重新建立连接: Receiver 位于 `SYN_RECV`, Sender 位于 `SYN_SENT`, 视作重新建立了连接
-        if (_receiver.ackno().has_value() && !(_receiver.stream_out().input_ended()) && _sender.next_seqno_absolute() > 0) {
-            _active = true;
+        // 注意不能处于 error 状态
+        if (!(_receiver.stream_out().error()) && !(_sender.stream_in().error())) {
+            if (_receiver.ackno().has_value() && !(_receiver.stream_out().input_ended()) && _sender.next_seqno_absolute() > 0) {
+                _active = true;
+            }
         }
         return; 
     }
     
     // inbound stream ended, outbound stream not EOF (此时我已经收到了对面的 FIN, 不需要等待，可以直接关闭)
-    if (_receiver.stream_out().input_ended() && (!_sender.stream_in().eof())) {
+    if (_receiver.stream_out().input_ended() && !(_sender.stream_in().eof())) {
         _linger_after_streams_finish = false;
     }
     // inbound stream ended and fully assembled & outbound stream ended and fully sent
-    if (_receiver.stream_out().input_ended() && _sender.stream_in().eof() && _sender.next_seqno_absolute() == _sender.stream_in().bytes_written() + 2) {
+    if (_receiver.stream_out().input_ended() && _sender.next_seqno_absolute() == _sender.stream_in().bytes_written() + 2 && _sender.bytes_in_flight() == 0) {
         if ((!_linger_after_streams_finish) || time_since_last_segment_received() >= 10 * _cfg.rt_timeout) {
             clean_shutdown();
         }
@@ -181,12 +185,9 @@ void TCPConnection::check_connection_state() {
 }
 
 void TCPConnection::unclean_shutdown() {
-    _need_sent_rst = true;
-    _sender.send_empty_segment();
     _sender.stream_in().set_error();
     _receiver.stream_out().set_error();
     _active = false;
-    push_segments_out();
 }
 
 void TCPConnection::clean_shutdown() {

@@ -28,6 +28,9 @@ class TCPReceiver {
 
     //! 同样只考虑首次收到的 SYN flag;
     bool _syn_received;
+
+    //! 检查 sequence number 是否合法
+    bool check_seqno(TCPSegment seg) const;
     
 
   public:
