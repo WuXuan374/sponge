@@ -127,12 +127,8 @@ void TCPSender::send_empty_segment(bool syn) {
         return;
     }
 
-    // TCPSegment tcp_seg = construct_segment(_next_seqno, 0);
-    // 约定这个特别的 segment, 其 seqno 为 receiver_ackno-1; 兜底的 absolute value 为 0(对应还没有建立连接，发送 SYN)
     TCPSegment tcp_seg = construct_segment(
-        _receiver_ackno != SIZE_MAX ? (_receiver_ackno - 1) : 0,
-        0,
-        syn
+        _next_seqno, 0, syn
     );
     size_t seg_len = tcp_seg.length_in_sequence_space();
     

@@ -30,19 +30,6 @@ size_t TCPConnection::time_since_last_segment_received() const {
 }
 
 void TCPConnection::segment_received(const TCPSegment &seg) { 
-    // 收到了 SYN, 并且 receiver 位于 LISTEN 状态; 则发送一个 SYN
-    if (seg.header().syn && !(_receiver.ackno().has_value())) {
-        _sender.send_empty_segment(true);
-        push_segments_out();
-    }
-    if (!active()) {
-        return;
-    }
-
-    if (_connection_alive_ms != SIZE_MAX) {
-        _timepoint_last_segment_received = _connection_alive_ms;
-    }
-    
     if (seg.header().rst) {
         unclean_shutdown();
         return;
@@ -56,19 +43,25 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
         );
     }
 
+    // 收到了 SYN, 并且 receiver 位于 LISTEN 状态; 则发送一个 SYN
+    if (seg.header().syn && !(_receiver.ackno().has_value())) {
+        _sender.send_empty_segment(true);
+        push_segments_out();
+    }
+
+    if (_connection_alive_ms != SIZE_MAX) {
+        _timepoint_last_segment_received = _connection_alive_ms;
+    }
+    
     size_t prev_size = _sender.segments_out().size();
     _sender.fill_window();
     
     // _segments_out 才能反映是否发送了 segment (即使是空的 segment)
     if (_sender.segments_out().size() == prev_size) {
-        // 对于非空的 incoming segment (占据至少一个 sequence number), 至少要回复一个 segment
-        // TODO: invalid sequence number 怎么弄
-        // 发送端会发送比 ack 小的 seqno
-        // if (
-        //     seg.length_in_sequence_space() > 0 ||
-        //     invalid_sequence_number(seg.header().seqno)
-        // )
-        if (seg.length_in_sequence_space() > 0) {
+        // 1. seg 占据了 sequence number; 2. "keep-alive" segment
+        if (seg.length_in_sequence_space() > 0 || (
+            _receiver.ackno().has_value() && (seg.header().seqno == _receiver.ackno().value()-1)
+        )) {
             _sender.send_empty_segment();
         }
         
@@ -142,14 +135,6 @@ TCPConnection::~TCPConnection() {
     } catch (const exception &e) {
         std::cerr << "Exception destructing TCP FSM: " << e.what() << std::endl;
     }
-}
-
-bool TCPConnection::invalid_sequence_number(WrappingInt32 seqno) {
-    // 对应 tcp_sender.cc L132
-    if (_receiver.ackno().has_value()) {
-        return (_receiver.ackno().value() - seqno) == 1;
-    } 
-    return false;
 }
 
 void TCPConnection::push_segments_out() {

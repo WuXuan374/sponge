@@ -33,10 +33,6 @@ class TCPConnection {
     //! 连接是否存活，初值为 true; 建立和关闭连接时需要维护
     bool _active{true};
 
-    //! 检查发送方的 seqno 是否不合法
-    //! 不合法: 约定为比 ackno 更小的
-    bool invalid_sequence_number(WrappingInt32 seqno);
-
     //! 从 sender 的队列中读取 segment, 并将其写入 connection 的 _segments_out
     //! 需要维护一些状态，比如 RST, ACK 等
     void push_segments_out();
