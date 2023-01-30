@@ -91,11 +91,9 @@ size_t TCPConnection::write(const string &data) {
 
 //! \param[in] ms_since_last_tick number of milliseconds since the last call to this method
 void TCPConnection::tick(const size_t ms_since_last_tick) { 
+    check_connection_state();
     if (!active()) {
-        check_connection_state();
-        if (!active()) {
-            return; 
-        }
+        return;
     }
     if (_connection_alive_ms == SIZE_MAX) {
         _connection_alive_ms = 0;
@@ -206,4 +204,10 @@ void TCPConnection::unclean_shutdown() {
 
 void TCPConnection::clean_shutdown() {
     _active = false;
+    // _sender.send_empty_segment(false, false);
+    // send last ack
+    // TCPSegment tcp_seg;
+    // tcp_seg.header().ack = true;
+    // tcp_seg.header().ackno = _receiver.ackno().value();
+    // _segments_out.push(tcp_seg);
 }

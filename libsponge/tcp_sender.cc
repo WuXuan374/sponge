@@ -122,13 +122,13 @@ unsigned int TCPSender::consecutive_retransmissions() const { return _consecutiv
 
 //! 数据长度非空时，注意维护 _receiver_window_size
 //! TODO: 需要传一个 invalid sequence number, 那么就传一个比 ack 更小的吧
-void TCPSender::send_empty_segment(bool syn) {
+void TCPSender::send_empty_segment(bool syn, bool fin) {
     if (!check_seqno(_next_seqno)) {
         return;
     }
 
     TCPSegment tcp_seg = construct_segment(
-        _next_seqno, 0, syn
+        _next_seqno, 0, syn, fin
     );
     size_t seg_len = tcp_seg.length_in_sequence_space();
     
@@ -195,7 +195,7 @@ void TCPSender::resend_segment(TCPSegment seg) {
     _timer_start = _ms_alive;
 }
 
-TCPSegment TCPSender::construct_segment(uint64_t seqno, uint64_t payload_len, bool syn) {
+TCPSegment TCPSender::construct_segment(uint64_t seqno, uint64_t payload_len, bool syn, bool fin) {
     TCPSegment tcp_seg;
     tcp_seg.header().seqno = wrap(seqno, _isn);
     if (syn && seqno == 0) {
@@ -208,7 +208,7 @@ TCPSegment TCPSender::construct_segment(uint64_t seqno, uint64_t payload_len, bo
     }
 
     // FIN 的优先级最低，在 window 还有剩余的情况下才添加该标记
-    if (_stream.eof() && tcp_seg.length_in_sequence_space() < sender_window_size()) {
+    if (_stream.eof() && tcp_seg.length_in_sequence_space() < sender_window_size() && fin) {
         tcp_seg.header().fin = true;
     }
     return tcp_seg;

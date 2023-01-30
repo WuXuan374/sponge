@@ -71,10 +71,6 @@ class TCPSender {
 
     uint64_t _bytes_in_flight{0};
 
-    //! 已经发送了 FIN, 并且收到对应的 ack
-    //! 则连接已经终止，应该停止发送 segments
-    bool _fin_acked{false};
-
     //! 给出起始 seqno 和数据的整体长度
     //! 将数据转成1个或多个 TCPSegment, 进行发送
     void send_segments(uint64_t start_seqno, uint64_t data_len);
@@ -84,7 +80,7 @@ class TCPSender {
 
     //! 由于 window 的限制，segment 的不同部分是存在优先级的
     //! 体现为 SYN flag > payload > FIN flag
-    TCPSegment construct_segment(uint64_t seqno, uint64_t payload_len, bool syn=true);
+    TCPSegment construct_segment(uint64_t seqno, uint64_t payload_len, bool syn=true, bool fin=true);
 
     //! 检查 seqno 是否合法，若不合法，则不应该发送这个 segment
     bool check_seqno(uint64_t seqno);
@@ -112,7 +108,7 @@ class TCPSender {
 
     //! \brief Generate an empty-payload segment (useful for creating empty ACK segments)
     //! 新增了 syn 参数，控制 segment 中的 syn 字段
-    void send_empty_segment(bool syn=false);
+    void send_empty_segment(bool syn=false, bool fin=true);
 
     //! \brief create and send segments to fill as much of the window as possible
     void fill_window();
@@ -147,6 +143,11 @@ class TCPSender {
 
     //! \brief relative seqno for the next byte to be sent
     WrappingInt32 next_seqno() const { return wrap(_next_seqno, _isn); }
+
+    //! 已经发送了 FIN, 并且收到对应的 ack
+    //! 则连接已经终止，应该停止发送 segments
+    bool _fin_acked{false};
+
     //!@}
 };
 
