@@ -26,6 +26,9 @@ class TCPReceiver {
     //! 只考虑首次收到的 FIN flag; 因此加一个标志位
     bool _fin_received;
 
+    //! 只考虑首次收到的 SYN flag;
+    bool _syn_received;
+
     //! 检查 sequence number 是否合法
     bool check_seqno(TCPSegment seg) const;
     
@@ -46,9 +49,6 @@ class TCPReceiver {
     //! This is the beginning of the receiver's window, or in other words, the sequence number
     //! of the first byte in the stream that the receiver hasn't received.
     std::optional<WrappingInt32> ackno() const;
-
-    //! 只考虑首次收到的 SYN flag;
-    bool _syn_received;
 
     //! \brief The window size that should be sent to the peer
     //!

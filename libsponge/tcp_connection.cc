@@ -47,23 +47,33 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
     if (_connection_alive_ms != SIZE_MAX) {
         _timepoint_last_segment_received = _connection_alive_ms;
     }
+
+    // 已经发送了 FIN, 这时候收到对面的 FIN, 应该回复一个 ack
+    if (seg.header().fin && _sender.next_seqno_absolute() == _sender.stream_in().bytes_written() + 2) {
+        // 由于此时stream 已经 eof 了，所以 fill window 无法回复，得手动补充一个 ack
+        TCPSegment tcp_seg;
+        tcp_seg.header().ack = true;
+        tcp_seg.header().ackno = _receiver.ackno().value();
+        _segments_out.push(tcp_seg);
+        return;
+    }
     
+    bool send_empty = true; // 是否需要额外补充一个 segment
     // 收到了 SYN, 并且 receiver 位于 LISTEN 状态; 则发送一个 SYN
     if (seg.header().syn && !(_receiver.ackno().has_value())) {
         _sender.send_empty_segment(true);
+        send_empty = false; // 已经回复了一个 segment, 无需补充
     }
     
     
-    if (_receiver._syn_received) {
+    if (_receiver.ackno().has_value()) { // 说明已经收到了 SYN, 建立了连接
         size_t prev_size = _sender.segments_out().size();
         _sender.fill_window();
         
         // _segments_out 才能反映是否发送了 segment (即使是空的 segment)
-        if (_sender.segments_out().size() == prev_size) {
+        if (_sender.segments_out().size() == prev_size && send_empty) {
             // 1. seg 占据了 sequence number; 2. "keep-alive" segment
-            if (seg.length_in_sequence_space() > 0 || (
-                _receiver.ackno().has_value() && (seg.header().seqno == _receiver.ackno().value()-1)
-            )) {
+            if (seg.length_in_sequence_space() > 0 || seg.header().seqno == _receiver.ackno().value()-1) {
                 _sender.send_empty_segment();
             }
         }
