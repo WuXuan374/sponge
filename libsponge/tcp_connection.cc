@@ -30,6 +30,7 @@ size_t TCPConnection::time_since_last_segment_received() const {
 }
 
 void TCPConnection::segment_received(const TCPSegment &seg) { 
+    if (!active()) return;
     if (seg.header().rst) {
         // 收到 RST, 直接关闭连接，不需要再发送RST
         unclean_shutdown();
@@ -201,7 +202,7 @@ void TCPConnection::check_connection_state() {
         _linger_after_streams_finish = false;
     }
     // inbound stream ended and fully assembled & outbound stream ended and fully sent
-    if (_receiver.stream_out().eof() && _sender.stream_in().eof() && _sender.next_seqno_absolute() == _sender.stream_in().bytes_written() + 2 && bytes_in_flight() == 0) {
+    if (_receiver.stream_out().eof() && _receiver.unassembled_bytes() == 0 && _sender.stream_in().eof() && _sender.next_seqno_absolute() == _sender.stream_in().bytes_written() + 2 && bytes_in_flight() == 0) {
         // 我已经发送了 FIN 并且收到了 ACK
         // 1. passive close (最开始我是收到 fin 的这一方) 2. 超时未收到消息
         if (!_linger_after_streams_finish || time_since_last_segment_received() >= 10 * _cfg.rt_timeout) {
@@ -218,10 +219,4 @@ void TCPConnection::unclean_shutdown() {
 
 void TCPConnection::clean_shutdown() {
     _active = false;
-    // _sender.send_empty_segment(false, false);
-    // send last ack
-    // TCPSegment tcp_seg;
-    // tcp_seg.header().ack = true;
-    // tcp_seg.header().ackno = _receiver.ackno().value();
-    // _segments_out.push(tcp_seg);
 }

@@ -1,3 +1,4 @@
+[toc]
 # 说明
 - 精简之前的笔记，既包括理论，也包括实现
 
@@ -150,6 +151,7 @@ ByteStream &stream_in() { return _stream; }
 - 发送 segment 之前的检查:
     - 如果已经发送了 FIN, 并收到了对应的 ack, 此时不应该发送 segment
     - 如果这个 seqno 不合法，体现为过大（超出已读取的数据量），不发送
+        - 如果比 isn 还小，同样也是不合法的
 - 不要重复发送 segment
     - 如果 segment 已经在 _outstanding_segments 中了，不要重复发送
 - 维护下列状态
@@ -207,13 +209,58 @@ ByteStream &stream_in() { return _stream; }
     - 也是通过一个 ByteStream 和应用层连接；但是这个 ByteStream 实现了流重组的功能; 应用层从 ByteStream 中读取重组好的数据
 ### 什么是 Connection
 - Connection 考虑的是两个 TCP peer 之间的连接，及其相关状态的维护
-- 每个 peer 都既有sender, 又有 receiver
+- 每个 peer 都既有 sender, 又有 receiver
     - 因为 TCP 是一个双向连接（全双工？），两个 peer 都可以发送和接收数据
 - connection 有哪些状态需要维护？
     - 连接的建立和关闭（整体状态）
-    - 一些高层的拥塞控制（?）机制，比如太久没有收到回复，应该终止连接
     - sender 和 receiver 同时完成的任务: 对于 peer, 收到一个 segment 之后，receiver 和 sender 都有相应的动作；相应地，发送 segment 时，sender 和 receiver 的信息（比如 receiver 的 ackno）都要带上
-    -
+        - 连接的建立和关闭也是需要两者同时完成的；比如说收到了对方的 SYN 报文，这时候 receiver 检查是不是首个 SYN 报文，如果是的话，自己也需要回复一个 SYN 报文
+    - 连接的异常终止 (RST 标志)
+### `segment_received`
+- 首先是检查 RST flag
+- 通知 sender(更新 ACK 标志，ackno 等) 和 receiver (更新 seqno, SYN, FIN 等)
+- 对于非空的 segment 至少需要回复一个 segment (从而更新 ackno, window size 这些)
+    - keep alive 报文是一个例外
+
+
+### 建立连接
+- 从 TCP peer 的角度, 有一个 peer 是主动建立连接，另一个则是接受该连接；但是两者的状态变化可以说是对称的
+    - 对于每个 peer, Sender 都会发送一个 SYN 报文之后，进入 `SYN_SENT` 状态；Receiver 收到带有 syn 的报文之后，进入 `SYN_RECV` 状态
+    - 只不过对于主动的那个 peer, SYN 是其主动发送的: `connect() 方法中`；对于被动的 peer, 是 Receiver 检查发现收到了 SYN 之后，才发送 SYN 的
+#### `connect()`
+- 调用时注意检查，是否位于 CLOSED 状态
+
+### active()?
+- 默认都是 `true`
+- 从 `false` 变成 `true`: SYN 发送完成，握手成功
+- 从 `true` 变成 `false`: clean/unclean shutdown
+
+### 关闭连接
+#### `unclean_shutdown`
+- 发送带有 RST flag 的 segment (或者接收这样的 segment)
+- 直接停止连接，bytestream 设置为 false
+#### clean shutdown
+- 从 TCP peer 的角度来说这个事
+- 连接关闭的时候，两个 peer 是不对称的，可以划分为先发送 FIN 的，和后发送 FIN 的
+- 首先关闭连接，需要满足
+    - inbound stream: fully assembled and ended
+    - outbound stream: ended and fully sent(包括 FIN 也发送了)
+- 希望通过机制，能够确认 **对方fully ack 所有我已经发送的报文**
+- 那么对于后发送 FIN 的 peer
+    - passive close
+    - 如果我发送的 FIN 收到了对应的 ack, 那么我就可以直接关闭连接（显然此时对方已经ack 了我的所有 segments）
+- 对于先发送 FIN 的 peer, 会复杂一些
+    - 首先是我发送 FIN 
+    - 然后我可能还得接收对面 peer 的普通 ack
+    - 随后我收到了对面发来的 FIN, 得回复一个 ACK
+        - 此时对面已经关闭连接了，是不会回复这个 ACK 的
+        - 因此这个 peer 并不能确定对方是否 ack 了自己发送的 segment；TCP 的机制是让这个 peer 等待 10*重传时间；一直没收到 segment, 就关闭连接
+### TODO
+- 没通过的 test cases，都是 txrx.sh 里头的
+    - 有的是连接关闭的不干净
+    - 还有 hash 值不同，应该是数据有点问题（没有重组好？）
+- 整体框架咋实现的，也得看看
+
 
 # 一些非代码问题的处理
 ## 磁盘空间不够:
