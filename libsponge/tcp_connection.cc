@@ -46,7 +46,12 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
 
     if (_connection_alive_ms != SIZE_MAX) {
         _timepoint_last_segment_received = _connection_alive_ms;
+    } else {
+        _connection_alive_ms = 0;
+        _timepoint_last_segment_received = 0;
     }
+
+    bool send_empty = true; // 是否需要额外补充一个 segment
 
     // 已经发送了 FIN, 这时候收到对面的 FIN, 应该回复一个 ack
     if (seg.header().fin && _sender.next_seqno_absolute() == _sender.stream_in().bytes_written() + 2) {
@@ -55,10 +60,10 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
         tcp_seg.header().ack = true;
         tcp_seg.header().ackno = _receiver.ackno().value();
         _segments_out.push(tcp_seg);
-        return;
+        send_empty = false; // 已经回复了一个 segment, 无需补充
     }
     
-    bool send_empty = true; // 是否需要额外补充一个 segment
+    
     // 收到了 SYN, 并且 receiver 位于 LISTEN 状态; 则发送一个 SYN
     if (seg.header().syn && !(_receiver.ackno().has_value())) {
         _sender.send_empty_segment(true);
@@ -102,9 +107,6 @@ size_t TCPConnection::write(const string &data) {
 //! \param[in] ms_since_last_tick number of milliseconds since the last call to this method
 void TCPConnection::tick(const size_t ms_since_last_tick) { 
     check_connection_state();
-    if (!active()) {
-        return;
-    }
     if (_connection_alive_ms == SIZE_MAX) {
         _connection_alive_ms = 0;
     } else {
@@ -194,13 +196,15 @@ void TCPConnection::check_connection_state() {
         return; 
     }
     
-    // inbound stream ended, outbound stream not EOF (此时我已经收到了对面的 FIN, 不需要等待，可以直接关闭)
+    // inbound stream ended, outbound stream not EOF (对面先发送 FIN, 则我发送 FIN 之后可以直接关闭)
     if (_receiver.stream_out().input_ended() && !(_sender.stream_in().eof())) {
         _linger_after_streams_finish = false;
     }
     // inbound stream ended and fully assembled & outbound stream ended and fully sent
-    if (_receiver.stream_out().input_ended() && _sender.next_seqno_absolute() == _sender.stream_in().bytes_written() + 2 && _sender.bytes_in_flight() == 0) {
-        if ((!_linger_after_streams_finish) || time_since_last_segment_received() >= 10 * _cfg.rt_timeout) {
+    if (_receiver.stream_out().eof() && _sender.stream_in().eof() && _sender.next_seqno_absolute() == _sender.stream_in().bytes_written() + 2 && bytes_in_flight() == 0) {
+        // 我已经发送了 FIN 并且收到了 ACK
+        // 1. passive close (最开始我是收到 fin 的这一方) 2. 超时未收到消息
+        if (!_linger_after_streams_finish || time_since_last_segment_received() >= 10 * _cfg.rt_timeout) {
             clean_shutdown();
         }
     }
