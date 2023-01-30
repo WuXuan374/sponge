@@ -1,4 +1,5 @@
-#include "socket.hh"
+// #include "socket.hh"
+#include "tcp_sponge_socket.hh"
 #include "util.hh"
 
 #include <cstdlib>
@@ -13,7 +14,8 @@ void get_URL(const string &host, const string &path) {
     // the computer whose name is in the "host" string,
     // then request the URL path given in the "path" string.
     
-    TCPSocket sock; // calling non-const members, so cannot add const prefix
+    // TCPSocket sock; // calling non-const members, so cannot add const prefix
+    CS144TCPSocket sock;
     sock.connect(Address(host, "http"));
 
     string msg = "GET " + path + " HTTP/1.1\r\n";
@@ -28,6 +30,7 @@ void get_URL(const string &host, const string &path) {
         cout << sock.read();
     }
     sock.close();
+    sock.wait_until_closed();
 }
 
 int main(int argc, char *argv[]) {
